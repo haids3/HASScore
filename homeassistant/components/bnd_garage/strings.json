@@ -1,0 +1,41 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
+      "wrong_hub": "The provided credentials belong to a different hub than the one being re-authenticated."
+    },
+    "error": {
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
+      "multiple_devices_found": "Found more than one device on this hub. This is not yet supported.",
+      "unknown": "[%key:common::config_flow::error::unknown%]"
+    },
+    "step": {
+      "reauth_confirm": {
+        "data": {
+          "activation_code": "Activation code",
+          "user_password": "User password"
+        },
+        "data_description": {
+          "activation_code": "The one-time activation code shown when adding a new user in the B&D Smart Garage Access app.",
+          "user_password": "The password you set for the new user in the B&D Smart Garage Access app."
+        },
+        "description": "Re-pair with your B&D SmartDoorDevices hub. Generate a new activation code in the B&D Smart Garage Access app under Settings → Users → your hub → Add new user, and set a password for that user."
+      },
+      "user": {
+        "data": {
+          "activation_code": "Activation code",
+          "host": "Hub IP address",
+          "user_password": "User password"
+        },
+        "data_description": {
+          "activation_code": "The one-time activation code shown when adding a new user in the B&D Smart Garage Access app.",
+          "host": "The LAN IP address of your B&D hub (Basestation). Check your router's DHCP client list.",
+          "user_password": "The password you set for the new user in the B&D Smart Garage Access app."
+        },
+        "description": "Pair a new phone with your B&D SmartDoorDevices hub. Generate an activation code in the B&D Smart Garage Access app under Settings → Users → your hub → Add new user, and set a password for that user."
+      }
+    }
+  }
+}

@@ -686,6 +686,9 @@ bluetooth-auto-recovery==1.6.4
 # homeassistant.components.private_ble_device
 bluetooth-data-tools==1.29.18
 
+# homeassistant.components.bnd_garage
+bnd-garage-api==0.1.0
+
 # homeassistant.components.bond
 bond-async==0.2.1
 

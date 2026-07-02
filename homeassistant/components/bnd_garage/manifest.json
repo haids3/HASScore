@@ -1,0 +1,12 @@
+{
+  "domain": "bnd_garage",
+  "name": "B&D Garage",
+  "codeowners": ["@haids3"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://www.home-assistant.io/integrations/bnd_garage",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "quality_scale": "bronze",
+  "requirements": ["bnd-garage-api==0.1.0"]
+}
