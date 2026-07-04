@@ -24,15 +24,14 @@ import logging
 import time
 from typing import Self
 
-from bnd_garage_api import Client, DoorState, DoorStatus
+from bnd_garage_api import Client
+
+from .hub_control import FALLBACK_RATE, async_send_direction, async_wait_until_stopped
 
 _LOGGER = logging.getLogger(__name__)
 
 STEP_COUNT = 9
 STEP_STARTUP_DELAY = 0.5
-SETTLE_TIMEOUT = 15.0
-POLL_INTERVAL = 0.5
-FALLBACK_RATE = 7.0
 
 
 @dataclass(frozen=True)
@@ -53,6 +52,37 @@ class CalibrationCurve:
                 fraction = (elapsed - t0) / (t1 - t0)
                 return round(p0 + (p1 - p0) * fraction)
         return points[-1][1]
+
+    def time_at(self, position: int) -> float:
+        """Interpolate elapsed time for the given position (inverse of position_at).
+
+        Works for both open curves (position increasing) and close curves
+        (position decreasing) - direction is inferred from the first/last
+        point rather than assumed.
+        """
+        points = self.points
+        first_t, first_p = points[0]
+        last_t, last_p = points[-1]
+        increasing = last_p >= first_p
+
+        if (increasing and position <= first_p) or (
+            not increasing and position >= first_p
+        ):
+            return first_t
+        if (increasing and position >= last_p) or (
+            not increasing and position <= last_p
+        ):
+            return last_t
+
+        for (t0, p0), (t1, p1) in pairwise(points):
+            if (increasing and p0 <= position <= p1) or (
+                not increasing and p1 <= position <= p0
+            ):
+                if p1 == p0:
+                    return t1
+                fraction = (position - p0) / (p1 - p0)
+                return t0 + (t1 - t0) * fraction
+        return last_t
 
     def to_json(self) -> list[list[float]]:
         """Serialize for storage in config entry options."""
@@ -77,12 +107,12 @@ async def async_calibrate(client: Client) -> tuple[CalibrationCurve, Calibration
     when genuinely needed, not on every run.
     """
     _LOGGER.debug("Starting travel calibration")
-    status = await _wait_until_stopped(client)
+    status = await async_wait_until_stopped(client)
 
     if status.position not in (0, 100):
         # Continue toward the nearer extreme, not the farther one.
-        await _send_direction(client, opening=status.position >= 50)
-        status = await _wait_until_stopped(client)
+        await async_send_direction(client, opening=status.position >= 50)
+        status = await async_wait_until_stopped(client)
 
     if status.position == 0:
         open_curve = await _sweep(client, opening=True, start_position=0)
@@ -107,7 +137,7 @@ async def _sweep(
         if (opening and position >= 90) or (not opening and position <= 10):
             break
 
-        await _send_direction(client, opening=opening)
+        await async_send_direction(client, opening=opening)
         # Sample the hub's live rate shortly after it actually starts moving,
         # rather than reusing a stale rate from the last at-rest reading
         # (which is always 0), so the ~10% step timing is accurate.
@@ -118,32 +148,14 @@ async def _sweep(
         await asyncio.sleep(remaining)
         await client.async_stop()
 
-        status = await _wait_until_stopped(client)
+        status = await async_wait_until_stopped(client)
         position = status.position
         points.append((time.monotonic() - start, position))
 
     # Let the final leg run to completion naturally rather than guessing the
     # last stop - doors decelerate hardest right at the limits.
-    await _send_direction(client, opening=opening)
-    status = await _wait_until_stopped(client)
+    await async_send_direction(client, opening=opening)
+    status = await async_wait_until_stopped(client)
     points.append((time.monotonic() - start, status.position))
 
     return CalibrationCurve(points=tuple(points))
-
-
-async def _send_direction(client: Client, *, opening: bool) -> None:
-    """Send the open or close command for this sweep's direction."""
-    if opening:
-        await client.async_open()
-    else:
-        await client.async_close_door()
-
-
-async def _wait_until_stopped(client: Client) -> DoorStatus:
-    """Poll until the hub reports the door is no longer moving."""
-    deadline = time.monotonic() + SETTLE_TIMEOUT
-    status = await client.async_get_status()
-    while status.state == DoorState.MOVING and time.monotonic() < deadline:
-        await asyncio.sleep(POLL_INTERVAL)
-        status = await client.async_get_status()
-    return status

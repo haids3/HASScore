@@ -7,6 +7,7 @@ from bnd_garage_api.exceptions import CannotConnect, HubCommandError, InvalidAut
 from bnd_garage_api.models import DoorState
 
 from homeassistant.components.cover import (
+    ATTR_POSITION,
     CoverDeviceClass,
     CoverEntity,
     CoverEntityFeature,
@@ -35,7 +36,10 @@ class BndGarageCover(BndGarageEntity, CoverEntity):
 
     _attr_device_class = CoverDeviceClass.GARAGE
     _attr_supported_features = (
-        CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
+        CoverEntityFeature.OPEN
+        | CoverEntityFeature.CLOSE
+        | CoverEntityFeature.STOP
+        | CoverEntityFeature.SET_POSITION
     )
     _attr_name = None
 
@@ -87,6 +91,18 @@ class BndGarageCover(BndGarageEntity, CoverEntity):
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the garage door."""
         await self._async_send_command(self.coordinator.client.async_stop)
+
+    @override
+    async def async_set_cover_position(self, **kwargs: Any) -> None:
+        """Move the door to approximately the given position.
+
+        The coordinator's set_position routine already refreshes afterward,
+        unlike the plain open/close/stop commands below.
+        """
+        try:
+            await self.coordinator.async_set_position(kwargs[ATTR_POSITION])
+        except (HubCommandError, CannotConnect, InvalidAuth) as err:
+            raise HomeAssistantError(str(err)) from err
 
     async def _async_send_command(self, command: Callable[[], Awaitable[None]]) -> None:
         try:

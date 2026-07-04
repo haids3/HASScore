@@ -16,6 +16,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .calibration import CalibrationCurve, async_calibrate
 from .const import DOMAIN
+from .hub_control import async_wait_until_stopped
+from .set_position import async_set_position
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -138,4 +140,26 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[DoorStatus]):
                 CONF_CLOSE_CURVE: self.close_curve.to_json(),
             },
         )
+        await self.async_request_refresh()
+
+    async def async_set_position(self, target_position: int) -> None:
+        """Drive the door to approximately the given position.
+
+        Pauses normal polling for the duration, since this drives the door
+        and polls status directly itself, like calibration does.
+        """
+        previous_interval = self.update_interval
+        self.update_interval = None
+        try:
+            status = await async_wait_until_stopped(self.client)
+            await async_set_position(
+                self.client,
+                status.position,
+                target_position,
+                self.open_curve,
+                self.close_curve,
+            )
+        finally:
+            self.update_interval = previous_interval
+
         await self.async_request_refresh()

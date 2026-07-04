@@ -179,6 +179,42 @@ def test_curve_position_at_reflects_deceleration_near_limits() -> None:
     assert curve.position_at(6) == 85  # slow segment
 
 
+@pytest.mark.parametrize(
+    ("position", "expected"),
+    [
+        pytest.param(0, 0, id="at-start"),
+        pytest.param(25, 2.5, id="midpoint"),
+        pytest.param(100, 10, id="at-end"),
+        pytest.param(-10, 0, id="before-start-clamped"),
+        pytest.param(110, 10, id="after-end-clamped"),
+    ],
+)
+def test_curve_time_at_interpolates_opening_curve(
+    position: int, expected: float
+) -> None:
+    """Test time_at inverts position_at for an increasing (opening) curve."""
+    curve = CalibrationCurve(points=((0, 0), (5, 50), (10, 100)))
+    assert curve.time_at(position) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    ("position", "expected"),
+    [
+        pytest.param(100, 0, id="at-start"),
+        pytest.param(50, 5, id="midpoint"),
+        pytest.param(0, 10, id="at-end"),
+        pytest.param(110, 0, id="above-start-clamped"),
+        pytest.param(-10, 10, id="below-end-clamped"),
+    ],
+)
+def test_curve_time_at_interpolates_closing_curve(
+    position: int, expected: float
+) -> None:
+    """Test time_at also works for a decreasing (closing) curve."""
+    curve = CalibrationCurve(points=((0, 100), (5, 50), (10, 0)))
+    assert curve.time_at(position) == pytest.approx(expected)
+
+
 def test_curve_json_round_trip() -> None:
     """Test the curve survives a to_json/from_json round trip."""
     curve = CalibrationCurve(points=((0.0, 0), (5.0, 50), (10.0, 100)))

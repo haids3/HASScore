@@ -320,3 +320,41 @@ async def test_async_calibrate_stores_curves_and_restores_polling(
 
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
+
+
+async def test_async_set_position_restores_polling_and_refreshes(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test set_position pauses polling, delegates the move, and restores it."""
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.CLOSED, position=0, rate=0
+    )
+    await setup_integration(hass, mock_config_entry, [])
+    coordinator = mock_config_entry.runtime_data
+    assert coordinator.update_interval == UPDATE_INTERVAL
+
+    final_status = DoorStatus(state=DoorState.PARTIAL, position=40, rate=0)
+    with (
+        patch(
+            "homeassistant.components.bnd_garage.coordinator.async_wait_until_stopped",
+            AsyncMock(
+                return_value=DoorStatus(state=DoorState.CLOSED, position=0, rate=0)
+            ),
+        ) as mock_wait,
+        patch(
+            "homeassistant.components.bnd_garage.coordinator.async_set_position",
+            AsyncMock(return_value=final_status),
+        ) as mock_set_position,
+    ):
+        await coordinator.async_set_position(40)
+
+    mock_wait.assert_awaited_once_with(coordinator.client)
+    mock_set_position.assert_awaited_once_with(
+        coordinator.client, 0, 40, coordinator.open_curve, coordinator.close_curve
+    )
+    assert coordinator.update_interval == UPDATE_INTERVAL
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
