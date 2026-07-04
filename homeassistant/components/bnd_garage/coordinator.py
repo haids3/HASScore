@@ -41,9 +41,9 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[DoorStatus]):
             update_interval=UPDATE_INTERVAL,
         )
         self.client = client
-        self._move_started_at: float | None = None
-        self._move_started_position: float = 0
-        self._move_rate = 0.0
+        self._estimated_position: float = 0
+        self._last_estimate_at: float | None = None
+        self._last_rate = 0.0
 
     @override
     async def _async_update_data(self) -> DoorStatus:
@@ -55,11 +55,14 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[DoorStatus]):
         except CannotConnect as err:
             raise UpdateFailed(str(err)) from err
 
+        self._advance_position_estimate(status.rate)
+
         if status.state == DoorState.MOVING:
-            status = replace(status, position=self._estimate_moving_position(status))
+            estimated = round(min(99, max(1, self._estimated_position)))
+            status = replace(status, position=estimated)
         else:
-            self._move_started_at = None
-            self._move_started_position = status.position
+            # Trust the hub's own reported position once it confirms it's at rest.
+            self._estimated_position = status.position
 
         self.update_interval = (
             MOVING_UPDATE_INTERVAL
@@ -68,30 +71,18 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[DoorStatus]):
         )
         return status
 
-    def _estimate_moving_position(self, status: DoorStatus) -> int:
-        """Extrapolate position from elapsed time and rate.
+    def _advance_position_estimate(self, rate: float) -> None:
+        """Fold in elapsed time at the previous rate, then adopt the new one.
 
-        The hub only reports the last at-rest position while actually moving
-        (confirmed against real hardware - position stays pinned at 0/100 for
-        the whole ~15s travel, then jumps straight to the final value), so we
-        estimate it locally instead of showing a stale number.
+        The hub only reports the last at-rest position while actually
+        moving, so we extrapolate locally instead. Re-adopting the rate on
+        every poll (not just once when movement starts) means a rate change
+        mid-travel - drift, or an obstruction safety-reverse - is picked up
+        within one poll interval rather than compounding a stale rate.
         """
         now = time.monotonic()
-        if self._move_started_at is None:
-            self._move_started_at = now
-            self._move_rate = status.rate
-        elif (status.rate > 0) != (self._move_rate > 0):
-            # Direction reversed mid-travel (e.g. an obstruction safety-reverse) -
-            # re-anchor from wherever we'd estimated we were, not the position
-            # from before this whole movement sequence started.
-            self._move_started_position = self._raw_position_estimate(now)
-            self._move_started_at = now
-            self._move_rate = status.rate
-
-        return round(min(99, max(1, self._raw_position_estimate(now))))
-
-    def _raw_position_estimate(self, now: float) -> float:
-        """Return the unclamped estimated position at the given monotonic time."""
-        assert self._move_started_at is not None
-        elapsed = now - self._move_started_at
-        return self._move_started_position + self._move_rate * elapsed
+        if self._last_estimate_at is not None:
+            elapsed = now - self._last_estimate_at
+            self._estimated_position += self._last_rate * elapsed
+        self._last_estimate_at = now
+        self._last_rate = rate

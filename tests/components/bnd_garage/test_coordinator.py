@@ -105,6 +105,60 @@ async def test_moving_position_is_estimated_from_elapsed_time(
     await hass.async_block_till_done()
 
 
+async def test_moving_position_picks_up_rate_drift_mid_travel(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test a same-direction rate change is picked up within one poll."""
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.CLOSED, position=0, rate=0
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=300.0,
+    ):
+        await setup_integration(hass, mock_config_entry, [])
+    coordinator = mock_config_entry.runtime_data
+
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.MOVING, position=0, rate=10
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=300.0,
+    ):
+        await coordinator.async_refresh()
+
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=302.0,
+    ):
+        await coordinator.async_refresh()
+    assert coordinator.data.position == 20  # 0 + 10%/s * 2s
+
+    # Same direction, but the hub now reports a slower rate.
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.MOVING, position=0, rate=5
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=304.0,
+    ):
+        await coordinator.async_refresh()
+    assert coordinator.data.position == 40  # 20 + 10%/s * 2s (still-old rate)
+
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=306.0,
+    ):
+        await coordinator.async_refresh()
+    assert coordinator.data.position == 50  # 40 + 5%/s * 2s (new rate applied)
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+
 async def test_moving_position_reanchors_on_direction_reversal(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
