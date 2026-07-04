@@ -7,10 +7,14 @@ one and reading the hub's actual at-rest position, to build a real
 elapsed-time-to-position curve per direction instead of assuming a constant
 rate throughout.
 
-Drives the door through exactly one open pass and one close pass in total -
-whichever direction reaches an extreme first from wherever the door
-currently is, then the other - not a separate "reset to a known start"
-pass, to avoid unnecessary extra travel/wear.
+Drives the door through exactly one open pass and one close pass, in
+whichever order gets there first - unless the door is already sitting at a
+partial position (not fully open or closed), in which case it repositions
+to the nearer extreme first. A pass that doesn't start from a true extreme
+would produce a curve the coordinator can never actually use later, so that
+repositioning step isn't optional the way an unconditional "always start
+by closing" step would be - it's only added when genuinely needed, not on
+every run.
 """
 
 import asyncio
@@ -65,20 +69,26 @@ class CalibrationCurve:
 async def async_calibrate(client: Client) -> tuple[CalibrationCurve, CalibrationCurve]:
     """Measure real open and close travel curves against the hub.
 
-    Runs exactly one open pass and one close pass - whichever direction
-    reaches an extreme first from the door's current position runs first -
-    recording the hub's actual reported position at each ~10% stop.
+    Runs exactly one open pass and one close pass, in whichever order gets
+    there first. If the door isn't already sitting at a known extreme (fully
+    open or fully closed), it's repositioned to the nearer one first - a
+    pass that doesn't start from a true extreme would produce a curve the
+    coordinator can never actually use later, so this step is only added
+    when genuinely needed, not on every run.
     """
     _LOGGER.debug("Starting travel calibration")
     status = await _wait_until_stopped(client)
 
-    if status.position < 50:
-        open_curve = await _sweep(client, opening=True, start_position=status.position)
+    if status.position not in (0, 100):
+        # Continue toward the nearer extreme, not the farther one.
+        await _send_direction(client, opening=status.position >= 50)
+        status = await _wait_until_stopped(client)
+
+    if status.position == 0:
+        open_curve = await _sweep(client, opening=True, start_position=0)
         close_curve = await _sweep(client, opening=False, start_position=100)
     else:
-        close_curve = await _sweep(
-            client, opening=False, start_position=status.position
-        )
+        close_curve = await _sweep(client, opening=False, start_position=100)
         open_curve = await _sweep(client, opening=True, start_position=0)
 
     _LOGGER.debug("Calibration complete: open=%s close=%s", open_curve, close_curve)

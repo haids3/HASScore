@@ -125,6 +125,24 @@ async def test_calibrate_from_open_runs_close_pass_then_open_pass() -> None:
     assert open_curve.points[-1][1] == 100
 
 
+async def test_calibrate_from_partial_repositions_to_nearer_extreme_first() -> None:
+    """Test a partial start repositions to a true extreme before either pass.
+
+    Otherwise the first pass would be anchored at the partial position
+    instead of 0/100, producing a curve the coordinator can never match
+    against a real future full-range movement - silently wasted data.
+    """
+    client = FakeClient(start_position=40)  # closer to closed
+
+    open_curve, close_curve = await async_calibrate(client)
+
+    assert _direction_passes(client.direction_log) == ["close", "open", "close"]
+    assert open_curve.points[0] == (0.0, 0)
+    assert open_curve.points[-1][1] == 100
+    assert close_curve.points[0] == (0.0, 100)
+    assert close_curve.points[-1][1] == 0
+
+
 async def test_calibrate_records_monotonic_positions() -> None:
     """Test each curve's recorded positions move consistently in one direction."""
     client = FakeClient(start_position=0)
