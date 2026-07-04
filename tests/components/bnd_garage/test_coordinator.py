@@ -1,6 +1,6 @@
 """Test the B&D Garage coordinator's adaptive poll interval."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from bnd_garage_api.models import DoorState, DoorStatus
 import pytest
@@ -63,6 +63,98 @@ async def test_poll_interval_reverts_after_movement_stops(
     await coordinator.async_refresh()
 
     assert coordinator.update_interval == UPDATE_INTERVAL
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_moving_position_is_estimated_from_elapsed_time(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test position is extrapolated locally from elapsed time and rate."""
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.CLOSED, position=0, rate=0
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=100.0,
+    ):
+        await setup_integration(hass, mock_config_entry, [])
+    coordinator = mock_config_entry.runtime_data
+
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.MOVING, position=0, rate=10
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=100.0,
+    ):
+        await coordinator.async_refresh()
+    assert coordinator.data.position == 1  # clamped, elapsed == 0
+
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=103.0,
+    ):
+        await coordinator.async_refresh()
+    assert coordinator.data.position == 30  # 0 + 10%/s * 3s
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_moving_position_reanchors_on_direction_reversal(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test a mid-travel direction reversal re-anchors from the current estimate."""
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.CLOSED, position=0, rate=0
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=200.0,
+    ):
+        await setup_integration(hass, mock_config_entry, [])
+    coordinator = mock_config_entry.runtime_data
+
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.MOVING, position=0, rate=10
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=200.0,
+    ):
+        await coordinator.async_refresh()  # anchors here: elapsed 0, position 1
+
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=203.0,
+    ):
+        await coordinator.async_refresh()
+    assert coordinator.data.position == 30  # 0 + 10%/s * 3s
+
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.MOVING, position=0, rate=-10
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=204.0,
+    ):
+        await coordinator.async_refresh()
+    # Re-anchors from the 40 it would have reached by t=204 on the old
+    # trajectory, not from the pre-movement position (0).
+    assert coordinator.data.position == 40
+
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=205.0,
+    ):
+        await coordinator.async_refresh()
+    assert coordinator.data.position == 30  # 40 - 10%/s * 1s on the new rate
 
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()

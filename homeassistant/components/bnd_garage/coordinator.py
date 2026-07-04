@@ -1,7 +1,9 @@
 """DataUpdateCoordinator for the B&D Garage integration."""
 
+from dataclasses import replace
 from datetime import timedelta
 import logging
+import time
 from typing import override
 
 from bnd_garage_api import Client, DoorState, DoorStatus
@@ -39,6 +41,9 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[DoorStatus]):
             update_interval=UPDATE_INTERVAL,
         )
         self.client = client
+        self._move_started_at: float | None = None
+        self._move_started_position: float = 0
+        self._move_rate = 0.0
 
     @override
     async def _async_update_data(self) -> DoorStatus:
@@ -50,9 +55,43 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[DoorStatus]):
         except CannotConnect as err:
             raise UpdateFailed(str(err)) from err
 
+        if status.state == DoorState.MOVING:
+            status = replace(status, position=self._estimate_moving_position(status))
+        else:
+            self._move_started_at = None
+            self._move_started_position = status.position
+
         self.update_interval = (
             MOVING_UPDATE_INTERVAL
             if status.state == DoorState.MOVING
             else UPDATE_INTERVAL
         )
         return status
+
+    def _estimate_moving_position(self, status: DoorStatus) -> int:
+        """Extrapolate position from elapsed time and rate.
+
+        The hub only reports the last at-rest position while actually moving
+        (confirmed against real hardware - position stays pinned at 0/100 for
+        the whole ~15s travel, then jumps straight to the final value), so we
+        estimate it locally instead of showing a stale number.
+        """
+        now = time.monotonic()
+        if self._move_started_at is None:
+            self._move_started_at = now
+            self._move_rate = status.rate
+        elif (status.rate > 0) != (self._move_rate > 0):
+            # Direction reversed mid-travel (e.g. an obstruction safety-reverse) -
+            # re-anchor from wherever we'd estimated we were, not the position
+            # from before this whole movement sequence started.
+            self._move_started_position = self._raw_position_estimate(now)
+            self._move_started_at = now
+            self._move_rate = status.rate
+
+        return round(min(99, max(1, self._raw_position_estimate(now))))
+
+    def _raw_position_estimate(self, now: float) -> float:
+        """Return the unclamped estimated position at the given monotonic time."""
+        assert self._move_started_at is not None
+        elapsed = now - self._move_started_at
+        return self._move_started_position + self._move_rate * elapsed
