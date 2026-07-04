@@ -142,8 +142,11 @@ async def _measure(
     client: Client, *, opening: bool, start_position: int
 ) -> CalibrationCurve:
     """Time one continuous, uninterrupted move, then build a standard curve."""
-    start = time.monotonic()
     await async_send_direction(client, opening=opening)
+    # Anchored after send_direction returns (not before), since that's what
+    # set_position.py also does before its own timed sleep - both need to
+    # measure from the same reference point to be comparable.
+    start = time.monotonic()
     status = await async_wait_until_stopped(client)
     total_time = time.monotonic() - start
     return build_curve(start_position, status.position, total_time)

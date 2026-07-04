@@ -16,7 +16,12 @@ import logging
 from bnd_garage_api import Client, DoorStatus
 
 from .calibration import CalibrationCurve
-from .hub_control import FALLBACK_RATE, async_send_direction, async_wait_until_stopped
+from .hub_control import (
+    COMMAND_SETTLE_DELAY,
+    FALLBACK_RATE,
+    async_send_direction,
+    async_wait_until_stopped,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -81,6 +86,10 @@ async def _move_toward(
             abs(target_position - current_position) / rate - STEP_STARTUP_DELAY,
         )
 
+    # Confirmed against real hardware: stopping too soon after a direction
+    # command is sometimes not honored (the door keeps going) - always leave
+    # at least a settle gap before sending stop.
+    duration = max(duration, COMMAND_SETTLE_DELAY)
     _LOGGER.debug(
         "Moving %s from %s to %s, sleeping %.2fs",
         "open" if opening else "close",

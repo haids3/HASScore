@@ -15,9 +15,23 @@ SETTLE_TIMEOUT = 15.0
 POLL_INTERVAL = 0.5
 FALLBACK_RATE = 7.0
 
+COMMAND_SETTLE_DELAY = 1.0
+"""Minimum gap enforced before sending a command that follows another one.
+
+Defensive only - NOT confirmed to fix anything. Real hardware testing found
+a reproducible failure where a close command sent right after an open
+movement just completed doesn't move the door at all (3/3 attempts, with
+this same 1s delay in place each time), while the reverse (open right after
+a close) and same-direction retries both work fine. That specific failure
+is still open and unresolved; this delay is kept as a generally-reasonable
+precaution for these automated multi-command sequences, not as a fix for
+it. See DEVELOPMENT_NOTES.md / session history for the full investigation.
+"""
+
 
 async def async_send_direction(client: Client, *, opening: bool) -> None:
     """Send the open or close command for the given direction."""
+    await asyncio.sleep(COMMAND_SETTLE_DELAY)
     if opening:
         await client.async_open()
     else:

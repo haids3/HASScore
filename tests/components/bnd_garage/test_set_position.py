@@ -1,6 +1,6 @@
 """Test move-to-position control."""
 
-from unittest.mock import ANY, AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, call, patch
 
 from bnd_garage_api import Client
 from bnd_garage_api.models import DoorState, DoorStatus
@@ -34,7 +34,9 @@ async def test_set_position_uses_curve_duration_when_available(
     client.async_open.assert_awaited_once()
     client.async_stop.assert_awaited_once()
     expected_duration = open_curve.time_at(80) - open_curve.time_at(0)
-    mock_sleep.assert_awaited_once_with(expected_duration)
+    # First call is the settle delay before send_direction actually sends
+    # open/close; second is the computed movement duration.
+    assert mock_sleep.await_args_list[-1] == call(expected_duration)
     assert status.position == 80
 
 
@@ -52,7 +54,8 @@ async def test_set_position_uses_flat_rate_when_uncalibrated(
 
     client.async_open.assert_awaited_once()
     client.async_stop.assert_awaited_once()
-    assert mock_sleep.await_args_list == [ANY, ANY]
+    # Settle delay, rate-sampling startup delay, then the computed duration.
+    assert mock_sleep.await_args_list == [ANY, ANY, ANY]
     assert status.position == 50
 
 
