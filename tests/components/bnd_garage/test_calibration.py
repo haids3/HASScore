@@ -7,18 +7,16 @@ from bnd_garage_api.models import DoorState, DoorStatus
 import pytest
 
 from homeassistant.components.bnd_garage.calibration import (
+    EDGE_DISTANCE_FRACTION,
+    EDGE_SPEED_FACTOR,
     CalibrationCurve,
     async_calibrate,
+    build_curve,
 )
 
 
 class FakeClient:
-    """Fake hub client simulating open/close/stop for calibration tests.
-
-    Each stop advances position by a fixed step in the current direction;
-    letting movement run without an explicit stop reaches the far extreme,
-    simulating the "final leg runs to completion" behavior.
-    """
+    """Fake hub client simulating one continuous open/close/stop cycle."""
 
     def __init__(self, start_position: int) -> None:
         """Initialize the fake client at the given starting position."""
@@ -26,43 +24,32 @@ class FakeClient:
         self.moving = False
         self.opening = True
         self.direction_log: list[str] = []
-        self.stop_calls = 0
-        self._polls_since_move_started = 0
 
     async def async_open(self) -> None:
         """Simulate sending the open command."""
         self.direction_log.append("open")
-        self._start_moving(opening=True)
+        self.moving = True
+        self.opening = True
 
     async def async_close_door(self) -> None:
         """Simulate sending the close command."""
         self.direction_log.append("close")
-        self._start_moving(opening=False)
-
-    def _start_moving(self, *, opening: bool) -> None:
         self.moving = True
-        self.opening = opening
-        self._polls_since_move_started = 0
+        self.opening = False
 
     async def async_stop(self) -> None:
-        """Simulate sending the stop command, advancing position by one step."""
-        self.stop_calls += 1
-        self.moving = False
-        delta = 10 if self.opening else -10
-        self.position = max(0, min(100, self.position + delta))
+        """Simulate sending the stop command (unused - moves run to completion)."""
 
     async def async_get_status(self) -> DoorStatus:
-        """Simulate a status poll, reaching the far extreme after one more poll."""
+        """Simulate a status poll, reaching the far extreme on the first poll."""
         if self.moving:
-            self._polls_since_move_started += 1
-            if self._polls_since_move_started > 1:
-                self.moving = False
-                self.position = 100 if self.opening else 0
-            else:
-                rate = 10.0 if self.opening else -10.0
-                return DoorStatus(
-                    state=DoorState.MOVING, position=self.position, rate=rate
-                )
+            self.moving = False
+            self.position = 100 if self.opening else 0
+            return DoorStatus(
+                state=DoorState.OPEN if self.opening else DoorState.CLOSED,
+                position=self.position,
+                rate=0,
+            )
 
         if self.position == 0:
             state = DoorState.CLOSED
@@ -74,15 +61,17 @@ class FakeClient:
 
 
 @pytest.fixture(autouse=True)
-def _no_real_sleep() -> None:
+def mock_sleep() -> AsyncMock:
+    """Mock asyncio.sleep so tests run instantly."""
     with patch(
-        "homeassistant.components.bnd_garage.calibration.asyncio.sleep", AsyncMock()
-    ):
-        yield
+        "homeassistant.components.bnd_garage.hub_control.asyncio.sleep", AsyncMock()
+    ) as mock_sleep:
+        yield mock_sleep
 
 
 @pytest.fixture(autouse=True)
-def _fake_clock() -> None:
+def fake_clock() -> None:
+    """Advance a fake monotonic clock by 1s per call, for deterministic timing."""
     with patch(
         "homeassistant.components.bnd_garage.calibration.time.monotonic",
         side_effect=count(0.0, 1.0),
@@ -91,7 +80,7 @@ def _fake_clock() -> None:
 
 
 def _direction_passes(log: list[str]) -> list[str]:
-    """Collapse a direction log into contiguous passes, e.g. ["open", "open", "close"] -> ["open", "close"]."""
+    """Collapse a direction log into contiguous passes."""
     passes: list[str] = []
     for direction in log:
         if not passes or passes[-1] != direction:
@@ -143,16 +132,39 @@ async def test_calibrate_from_partial_repositions_to_nearer_extreme_first() -> N
     assert close_curve.points[-1][1] == 0
 
 
-async def test_calibrate_records_monotonic_positions() -> None:
-    """Test each curve's recorded positions move consistently in one direction."""
-    client = FakeClient(start_position=0)
+def test_build_curve_has_slow_edges_and_fast_middle() -> None:
+    """Test the standard shape: slow first/last EDGE_DISTANCE_FRACTION, fast middle.
 
-    open_curve, close_curve = await async_calibrate(client)
+    This is a deliberate assumption, not a per-installation measurement -
+    confirmed against real hardware that repeatedly stopping to sample
+    intermediate positions re-triggers the motor's soft-start ramp-up on
+    every restart, contaminating a directly-measured shape far worse than
+    assuming a standard one.
+    """
+    curve = build_curve(0, 100, total_time=16.0)
 
-    open_positions = [p for _, p in open_curve.points]
-    close_positions = [p for _, p in close_curve.points]
-    assert open_positions == sorted(open_positions)
-    assert close_positions == sorted(close_positions, reverse=True)
+    edge_time = 16.0 * EDGE_DISTANCE_FRACTION / EDGE_SPEED_FACTOR
+    assert curve.points == (
+        (0.0, 0),
+        (pytest.approx(edge_time), 10),
+        (pytest.approx(16.0 - edge_time), 90),
+        (16.0, 100),
+    )
+    # Middle segment covers 80% of distance in 60% of time - faster than the
+    # edges, which cover 10% of distance in 20% of time each.
+    middle_rate = 80 / (16.0 - 2 * edge_time)
+    edge_rate = 10 / edge_time
+    assert middle_rate > edge_rate
+
+
+def test_build_curve_works_for_closing_direction() -> None:
+    """Test the standard shape applies symmetrically to a closing movement."""
+    curve = build_curve(100, 0, total_time=20.0)
+
+    assert curve.points[0] == (0.0, 100)
+    assert curve.points[-1] == (20.0, 0)
+    assert curve.points[1][1] == 90  # first edge: 10% closed after 20% of time
+    assert curve.points[2][1] == 10  # last edge starts: 90% closed
 
 
 @pytest.mark.parametrize(

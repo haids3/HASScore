@@ -2,10 +2,24 @@
 
 Real garage doors decelerate near their open/closed limits, so a single
 average rate (what DataUpdateCoordinator falls back to when uncalibrated)
-isn't accurate there. This drives the door in ~10% steps, stopping at each
-one and reading the hub's actual at-rest position, to build a real
-elapsed-time-to-position curve per direction instead of assuming a constant
-rate throughout.
+isn't accurate there. This times one continuous, uninterrupted full-range
+movement per direction, then builds a standard-shaped curve around that
+real measured total time: the first and last EDGE_DISTANCE_FRACTION of
+travel at EDGE_SPEED_FACTOR times the average rate (motor soft-start
+ramp-up, and mechanical deceleration approaching the limit), the middle
+faster to match.
+
+This deliberately does NOT measure the curve's shape by stopping and
+checking position at intermediate ~10% marks. Confirmed against real
+hardware: doing that repeatedly stops and restarts the door, and each
+restart re-triggers the motor's own soft-start ramp-up - so a curve built
+that way accumulates *nine* ramp-ups instead of the *one* a real continuous
+move actually has, measuring roughly 60% slower than reality. There's no
+way to sample true intermediate position without stopping (the hub only
+reports position at rest), so a real per-installation shape isn't
+obtainable this way at all - the standard shape assumption is a deliberate
+trade of shape precision for not contaminating the one number (total time)
+that matters most.
 
 Drives the door through exactly one open pass and one close pass, in
 whichever order gets there first - unless the door is already sitting at a
@@ -17,7 +31,6 @@ by closing" step would be - it's only added when genuinely needed, not on
 every run.
 """
 
-import asyncio
 from dataclasses import dataclass
 from itertools import pairwise
 import logging
@@ -26,12 +39,12 @@ from typing import Self
 
 from bnd_garage_api import Client
 
-from .hub_control import FALLBACK_RATE, async_send_direction, async_wait_until_stopped
+from .hub_control import async_send_direction, async_wait_until_stopped
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_COUNT = 9
-STEP_STARTUP_DELAY = 0.5
+EDGE_DISTANCE_FRACTION = 0.10
+EDGE_SPEED_FACTOR = 0.5
 
 
 @dataclass(frozen=True)
@@ -97,7 +110,7 @@ class CalibrationCurve:
 
 
 async def async_calibrate(client: Client) -> tuple[CalibrationCurve, CalibrationCurve]:
-    """Measure real open and close travel curves against the hub.
+    """Measure real open and close travel times against the hub.
 
     Runs exactly one open pass and one close pass, in whichever order gets
     there first. If the door isn't already sitting at a known extreme (fully
@@ -115,47 +128,44 @@ async def async_calibrate(client: Client) -> tuple[CalibrationCurve, Calibration
         status = await async_wait_until_stopped(client)
 
     if status.position == 0:
-        open_curve = await _sweep(client, opening=True, start_position=0)
-        close_curve = await _sweep(client, opening=False, start_position=100)
+        open_curve = await _measure(client, opening=True, start_position=0)
+        close_curve = await _measure(client, opening=False, start_position=100)
     else:
-        close_curve = await _sweep(client, opening=False, start_position=100)
-        open_curve = await _sweep(client, opening=True, start_position=0)
+        close_curve = await _measure(client, opening=False, start_position=100)
+        open_curve = await _measure(client, opening=True, start_position=0)
 
     _LOGGER.debug("Calibration complete: open=%s close=%s", open_curve, close_curve)
     return open_curve, close_curve
 
 
-async def _sweep(
+async def _measure(
     client: Client, *, opening: bool, start_position: int
 ) -> CalibrationCurve:
-    """Drive one direction in ~10% steps, recording actual rest positions."""
-    points: list[tuple[float, int]] = [(0.0, start_position)]
+    """Time one continuous, uninterrupted move, then build a standard curve."""
     start = time.monotonic()
-    position = start_position
-
-    for _ in range(STEP_COUNT):
-        if (opening and position >= 90) or (not opening and position <= 10):
-            break
-
-        await async_send_direction(client, opening=opening)
-        # Sample the hub's live rate shortly after it actually starts moving,
-        # rather than reusing a stale rate from the last at-rest reading
-        # (which is always 0), so the ~10% step timing is accurate.
-        await asyncio.sleep(STEP_STARTUP_DELAY)
-        moving_status = await client.async_get_status()
-        rate = abs(moving_status.rate) or FALLBACK_RATE
-        remaining = max(0.0, 10 / rate - STEP_STARTUP_DELAY)
-        await asyncio.sleep(remaining)
-        await client.async_stop()
-
-        status = await async_wait_until_stopped(client)
-        position = status.position
-        points.append((time.monotonic() - start, position))
-
-    # Let the final leg run to completion naturally rather than guessing the
-    # last stop - doors decelerate hardest right at the limits.
     await async_send_direction(client, opening=opening)
     status = await async_wait_until_stopped(client)
-    points.append((time.monotonic() - start, status.position))
+    total_time = time.monotonic() - start
+    return build_curve(start_position, status.position, total_time)
 
-    return CalibrationCurve(points=tuple(points))
+
+def build_curve(
+    start_position: int, end_position: int, total_time: float
+) -> CalibrationCurve:
+    """Build a standard-shaped curve from one measured continuous movement.
+
+    Shared by the explicit calibration routine above and the coordinator's
+    passive auto-calibration, which builds the same shape from the timing of
+    an ordinary full-range open/close during regular use.
+    """
+    distance = end_position - start_position
+    edge_distance = distance * EDGE_DISTANCE_FRACTION
+    edge_time = total_time * EDGE_DISTANCE_FRACTION / EDGE_SPEED_FACTOR
+
+    points = (
+        (0.0, start_position),
+        (edge_time, round(start_position + edge_distance)),
+        (total_time - edge_time, round(end_position - edge_distance)),
+        (total_time, end_position),
+    )
+    return CalibrationCurve(points=points)

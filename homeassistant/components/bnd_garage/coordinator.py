@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .calibration import CalibrationCurve, async_calibrate
+from .calibration import CalibrationCurve, async_calibrate, build_curve
 from .const import DOMAIN
 from .hub_control import async_wait_until_stopped
 from .set_position import async_set_position
@@ -75,6 +75,7 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[DoorStatus]):
             estimated = round(min(99, max(1, self._estimated_position)))
             status = replace(status, position=estimated)
         else:
+            self._maybe_auto_calibrate(status.position)
             # Trust the hub's own reported position once it confirms it's at rest.
             self._estimated_position = status.position
             self._segment_started_at = None
@@ -119,6 +120,47 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[DoorStatus]):
         self._last_estimate_at = now
         self._last_rate = status.rate
 
+    def _maybe_auto_calibrate(self, end_position: int) -> None:
+        """Passively (re)build a curve from an ordinary full-range movement.
+
+        A normal full open or full close during regular use is exactly the
+        same measurement calibration.async_calibrate() makes on demand - so
+        this keeps the curve current without anyone needing to remember to
+        press the calibrate button, and self-corrects for drift (wear,
+        temperature) over time. Only applies to a clean single-direction
+        segment that started at a true extreme and ended at the other one;
+        a mid-travel reversal already resets segment tracking to a
+        non-extreme start position, so it's naturally excluded here too.
+        """
+        if self._segment_started_at is None or self._segment_is_opening is None:
+            return
+        if self._segment_start_position not in (0, 100):
+            return
+        expected_end = 100 if self._segment_is_opening else 0
+        if end_position != expected_end:
+            return
+
+        total_time = time.monotonic() - self._segment_started_at
+        curve = build_curve(int(self._segment_start_position), end_position, total_time)
+        if self._segment_is_opening:
+            self.open_curve = curve
+        else:
+            self.close_curve = curve
+        self._persist_curves()
+
+    def _persist_curves(self) -> None:
+        """Save the current curves to the config entry's options."""
+        self.hass.config_entries.async_update_entry(
+            self.config_entry,
+            options={
+                **self.config_entry.options,
+                CONF_OPEN_CURVE: self.open_curve.to_json() if self.open_curve else None,
+                CONF_CLOSE_CURVE: self.close_curve.to_json()
+                if self.close_curve
+                else None,
+            },
+        )
+
     async def async_calibrate(self) -> None:
         """Measure and store real open/close travel curves.
 
@@ -132,14 +174,7 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[DoorStatus]):
         finally:
             self.update_interval = previous_interval
 
-        self.hass.config_entries.async_update_entry(
-            self.config_entry,
-            options={
-                **self.config_entry.options,
-                CONF_OPEN_CURVE: self.open_curve.to_json(),
-                CONF_CLOSE_CURVE: self.close_curve.to_json(),
-            },
-        )
+        self._persist_curves()
         await self.async_request_refresh()
 
     async def async_set_position(self, target_position: int) -> None:

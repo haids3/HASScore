@@ -358,3 +358,180 @@ async def test_async_set_position_restores_polling_and_refreshes(
 
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
+
+
+async def test_auto_calibrates_from_full_open_movement(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test a normal full open passively builds the open curve."""
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.CLOSED, position=0, rate=0
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=1000.0,
+    ):
+        await setup_integration(hass, mock_config_entry, [])
+    coordinator = mock_config_entry.runtime_data
+    assert coordinator.open_curve is None
+
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.MOVING, position=0, rate=10
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=1000.0,
+    ):
+        await coordinator.async_refresh()
+
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.OPEN, position=100, rate=0
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=1016.0,
+    ):
+        await coordinator.async_refresh()
+
+    assert coordinator.open_curve is not None
+    assert coordinator.open_curve.points[0] == (0.0, 0)
+    assert coordinator.open_curve.points[-1] == (16.0, 100)
+    assert mock_config_entry.options["open_curve"] == coordinator.open_curve.to_json()
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_auto_calibrates_from_full_close_movement(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test a normal full close passively builds the close curve."""
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.OPEN, position=100, rate=0
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=2000.0,
+    ):
+        await setup_integration(hass, mock_config_entry, [])
+    coordinator = mock_config_entry.runtime_data
+
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.MOVING, position=100, rate=-10
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=2000.0,
+    ):
+        await coordinator.async_refresh()
+
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.CLOSED, position=0, rate=0
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=2020.0,
+    ):
+        await coordinator.async_refresh()
+
+    assert coordinator.close_curve is not None
+    assert coordinator.close_curve.points[0] == (0.0, 100)
+    assert coordinator.close_curve.points[-1] == (20.0, 0)
+    assert mock_config_entry.options["close_curve"] == coordinator.close_curve.to_json()
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_auto_calibrate_skips_movement_not_starting_at_extreme(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test resuming from a partial position doesn't produce a curve.
+
+    That segment can't represent the full 0-100 range, so a curve built
+    from it would never match a real future full-range movement anyway.
+    """
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.PARTIAL, position=30, rate=0
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=3000.0,
+    ):
+        await setup_integration(hass, mock_config_entry, [])
+    coordinator = mock_config_entry.runtime_data
+
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.MOVING, position=30, rate=10
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=3000.0,
+    ):
+        await coordinator.async_refresh()
+
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.OPEN, position=100, rate=0
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=3010.0,
+    ):
+        await coordinator.async_refresh()
+
+    assert coordinator.open_curve is None
+    assert "open_curve" not in mock_config_entry.options
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_auto_calibrate_skips_movement_stopped_short_of_extreme(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test a movement that stops short of the far extreme isn't calibrated.
+
+    E.g. an obstruction safety-stop partway through - that's not a
+    representative full-range measurement.
+    """
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.CLOSED, position=0, rate=0
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=4000.0,
+    ):
+        await setup_integration(hass, mock_config_entry, [])
+    coordinator = mock_config_entry.runtime_data
+
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.MOVING, position=0, rate=10
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=4000.0,
+    ):
+        await coordinator.async_refresh()
+
+    mock_client.async_get_status.return_value = DoorStatus(
+        state=DoorState.PARTIAL, position=60, rate=0
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=4008.0,
+    ):
+        await coordinator.async_refresh()
+
+    assert coordinator.open_curve is None
+    assert "open_curve" not in mock_config_entry.options
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()

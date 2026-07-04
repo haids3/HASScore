@@ -11,11 +11,14 @@ another stop/start cycle on the door.
 """
 
 import asyncio
+import logging
 
 from bnd_garage_api import Client, DoorStatus
 
 from .calibration import CalibrationCurve
 from .hub_control import FALLBACK_RATE, async_send_direction, async_wait_until_stopped
+
+_LOGGER = logging.getLogger(__name__)
 
 TOLERANCE = 5
 STEP_STARTUP_DELAY = 0.5
@@ -32,11 +35,18 @@ async def async_set_position(
     status = await _move_toward(
         client, current_position, target_position, open_curve, close_curve
     )
+    _LOGGER.debug(
+        "First move toward %s from %s landed at %s",
+        target_position,
+        current_position,
+        status.position,
+    )
 
     if abs(status.position - target_position) > TOLERANCE:
         status = await _move_toward(
             client, status.position, target_position, open_curve, close_curve
         )
+        _LOGGER.debug("Correction move landed at %s", status.position)
 
     return status
 
@@ -71,6 +81,13 @@ async def _move_toward(
             abs(target_position - current_position) / rate - STEP_STARTUP_DELAY,
         )
 
+    _LOGGER.debug(
+        "Moving %s from %s to %s, sleeping %.2fs",
+        "open" if opening else "close",
+        current_position,
+        target_position,
+        duration,
+    )
     await asyncio.sleep(duration)
     await client.async_stop()
     return await async_wait_until_stopped(client)
