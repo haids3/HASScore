@@ -11,27 +11,24 @@ import time
 
 from bnd_garage_api import Client, DoorState, DoorStatus
 
-SETTLE_TIMEOUT = 15.0
+SETTLE_TIMEOUT = 30.0
+"""Max time to wait for the hub to report the door has stopped moving.
+
+Confirmed against real hardware: a full close takes ~19-20s on this door,
+longer than the 15s this was originally set to (that value was fine back
+when every wait was for a ~10% step, not a full continuous range - it just
+never got revisited when calibration.py switched to timing full moves).
+Too short a value here doesn't fail loudly - async_wait_until_stopped just
+returns whatever stale status it last polled while the door was still
+genuinely moving, which looks exactly like the door not responding to a
+command at all. Comfortable margin above the slowest direction measured.
+"""
 POLL_INTERVAL = 0.5
 FALLBACK_RATE = 7.0
-
-COMMAND_SETTLE_DELAY = 1.0
-"""Minimum gap enforced before sending a command that follows another one.
-
-Defensive only - NOT confirmed to fix anything. Real hardware testing found
-a reproducible failure where a close command sent right after an open
-movement just completed doesn't move the door at all (3/3 attempts, with
-this same 1s delay in place each time), while the reverse (open right after
-a close) and same-direction retries both work fine. That specific failure
-is still open and unresolved; this delay is kept as a generally-reasonable
-precaution for these automated multi-command sequences, not as a fix for
-it. See DEVELOPMENT_NOTES.md / session history for the full investigation.
-"""
 
 
 async def async_send_direction(client: Client, *, opening: bool) -> None:
     """Send the open or close command for the given direction."""
-    await asyncio.sleep(COMMAND_SETTLE_DELAY)
     if opening:
         await client.async_open()
     else:
