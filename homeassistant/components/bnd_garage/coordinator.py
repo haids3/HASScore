@@ -16,7 +16,7 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-UPDATE_INTERVAL = timedelta(seconds=30)
+UPDATE_INTERVAL = timedelta(seconds=10)
 
 type BndGarageConfigEntry = ConfigEntry[BndGarageDataUpdateCoordinator]
 

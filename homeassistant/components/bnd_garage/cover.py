@@ -43,6 +43,8 @@ class BndGarageCover(BndGarageEntity, CoverEntity):
     @override
     def current_cover_position(self) -> int | None:
         """Return the current position of the door, 0 (closed) to 100 (open)."""
+        if self.coordinator.data.state == DoorState.UNKNOWN:
+            return None
         return self.coordinator.data.position
 
     @property
