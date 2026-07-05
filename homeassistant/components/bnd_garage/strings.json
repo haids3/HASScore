@@ -19,9 +19,9 @@
         },
         "data_description": {
           "activation_code": "The one-time activation code shown when adding a new user in the B&D Smart Garage Access app.",
-          "user_password": "The password you set for the new user in the B&D Smart Garage Access app."
+          "user_password": "The password shown for the new user in the B&D Smart Garage Access app - it's assigned automatically, not one you choose."
         },
-        "description": "Re-pair with your B&D SmartDoorDevices hub. Generate a new activation code in the B&D Smart Garage Access app under Settings → Users → your hub → Add new user, and set a password for that user."
+        "description": "Re-pair with your B&D SmartDoorDevices hub. In the B&D Smart Garage Access app, go to Settings → Users → your hub → Add new user, then note the activation code and password it shows you."
       },
       "user": {
         "data": {
@@ -32,9 +32,9 @@
         "data_description": {
           "activation_code": "The one-time activation code shown when adding a new user in the B&D Smart Garage Access app.",
           "host": "The LAN IP address of your B&D hub (Basestation). Check your router's DHCP client list.",
-          "user_password": "The password you set for the new user in the B&D Smart Garage Access app."
+          "user_password": "The password shown for the new user in the B&D Smart Garage Access app - it's assigned automatically, not one you choose."
         },
-        "description": "Pair a new phone with your B&D SmartDoorDevices hub. Generate an activation code in the B&D Smart Garage Access app under Settings → Users → your hub → Add new user, and set a password for that user."
+        "description": "Pair a new phone with your B&D SmartDoorDevices hub. In the B&D Smart Garage Access app, go to Settings → Users → your hub → Add new user, then note the activation code and password it shows you."
       }
     }
   }
