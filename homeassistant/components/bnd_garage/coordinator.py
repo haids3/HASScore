@@ -24,6 +24,7 @@ MOVING_UPDATE_INTERVAL = timedelta(seconds=2)
 
 CONF_OPEN_CURVE = "open_curve"
 CONF_CLOSE_CURVE = "close_curve"
+CONF_PRESET_POSITIONS = "preset_positions"
 
 type BndGarageConfigEntry = ConfigEntry[BndGarageDataUpdateCoordinator]
 
@@ -51,12 +52,19 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[DoorStatus]):
         self._segment_started_at: float | None = None
         self._segment_is_opening: bool | None = None
         self._segment_start_position: float = 0
+        self._pending_preset_cmd: int | None = None
         self.open_curve = CalibrationCurve.from_json(
             config_entry.options.get(CONF_OPEN_CURVE)
         )
         self.close_curve = CalibrationCurve.from_json(
             config_entry.options.get(CONF_CLOSE_CURVE)
         )
+        self._preset_positions: dict[int, int] = {
+            int(cmd): position
+            for cmd, position in config_entry.options.get(
+                CONF_PRESET_POSITIONS, {}
+            ).items()
+        }
 
     @override
     async def _async_update_data(self) -> DoorStatus:
@@ -74,6 +82,7 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[DoorStatus]):
             status = replace(status, position=estimated)
         else:
             self._maybe_auto_calibrate(status.position)
+            self._maybe_record_preset_position(status.position)
             # Trust the hub's own reported position once it confirms it's at rest.
             self._estimated_position = status.position
             self._segment_started_at = None
@@ -155,3 +164,44 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[DoorStatus]):
                 else None,
             },
         )
+
+    def _maybe_record_preset_position(self, end_position: int) -> None:
+        """Remember where the door settled after a preset (e.g. Pet) was used.
+
+        A preset's target position is configured in the vendor app and isn't
+        included in the hub's own aux listing, so the only way to know it is
+        to trigger the preset and see where the door ends up. Only reliable
+        if nothing else redirects the door before it settles - acceptable
+        since presets are a one-shot, uninterrupted action in normal use.
+        """
+        if self._pending_preset_cmd is None:
+            return
+        self._preset_positions[self._pending_preset_cmd] = end_position
+        self._pending_preset_cmd = None
+        self.hass.config_entries.async_update_entry(
+            self.config_entry,
+            options={
+                **self.config_entry.options,
+                CONF_PRESET_POSITIONS: {
+                    str(cmd): position
+                    for cmd, position in self._preset_positions.items()
+                },
+            },
+        )
+
+    def preset_position(self, cmd: int) -> int | None:
+        """Return the last observed settled position for a preset, if known."""
+        return self._preset_positions.get(cmd)
+
+    async def async_activate_preset(self, cmd: int) -> None:
+        """Trigger a hub preset (e.g. a position preset) and refresh status.
+
+        Relies on the immediate refresh already seeing the door as MOVING
+        (confirmed live: the hub reports a nonzero rate as soon as
+        async_send_command returns) - otherwise this poll would record the
+        pre-move position as the preset's target instead of waiting for it
+        to settle.
+        """
+        await self.client.async_send_command(cmd)
+        self._pending_preset_cmd = cmd
+        await self.async_request_refresh()

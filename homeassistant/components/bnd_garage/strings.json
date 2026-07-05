@@ -37,5 +37,12 @@
         "description": "Pair a new phone with your B&D SmartDoorDevices hub. In the B&D Smart Garage Access app, go to Settings → Users → your hub → Add new user, then note the activation code and password it shows you."
       }
     }
+  },
+  "entity": {
+    "light": {
+      "hub_light": {
+        "name": "Light"
+      }
+    }
   }
 }
