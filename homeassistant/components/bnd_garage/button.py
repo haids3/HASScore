@@ -23,8 +23,8 @@ async def async_setup_entry(
     """Set up a button for each position preset the hub currently reports."""
     coordinator = entry.runtime_data
     async_add_entities(
-        BndGaragePresetButton(coordinator, preset.cmd)
-        for preset in coordinator.data.presets
+        BndGaragePresetButton(coordinator, index, preset.cmd)
+        for index, preset in enumerate(coordinator.data.presets)
     )
 
 
@@ -33,13 +33,20 @@ class BndGaragePresetButton(BndGarageEntity, ButtonEntity):
 
     The preset's name and target position are both configured in the vendor
     app and can change at any time, so both are read live from the
-    coordinator on every access rather than cached at creation.
+    coordinator on every access rather than cached at creation. The
+    entity_id is deliberately *not* derived from the (changeable) title -
+    otherwise renaming a preset in the app (e.g. Pet -> Ventilation) would
+    leave a stale, mismatched entity_id behind permanently, since Home
+    Assistant only picks an entity_id once and doesn't rename it.
     """
 
-    def __init__(self, coordinator: BndGarageDataUpdateCoordinator, cmd: int) -> None:
+    def __init__(
+        self, coordinator: BndGarageDataUpdateCoordinator, index: int, cmd: int
+    ) -> None:
         """Initialize the button for a specific preset command code."""
         super().__init__(coordinator)
         self._cmd = cmd
+        self._suggested_object_id = f"partial_{index + 1}"
         self._attr_unique_id = f"{self._attr_unique_id}_preset_{cmd}"
 
     @property
@@ -50,6 +57,12 @@ class BndGaragePresetButton(BndGarageEntity, ButtonEntity):
             if preset.cmd == self._cmd:
                 return preset.title
         return None
+
+    @property
+    @override
+    def suggested_object_id(self) -> str | None:
+        """Return a stable, title-independent suggested entity_id slug."""
+        return self._suggested_object_id
 
     @property
     @override

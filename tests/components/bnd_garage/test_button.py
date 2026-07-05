@@ -16,7 +16,7 @@ from . import setup_integration
 
 from tests.common import MockConfigEntry
 
-PET_ENTITY_ID = "button.b_d_garage_pet"
+PET_ENTITY_ID = "button.b_d_garage_partial_1"
 
 
 async def test_no_buttons_created_when_hub_reports_no_presets(
@@ -52,9 +52,9 @@ async def test_a_button_is_created_per_preset(
     await setup_integration(hass, mock_config_entry, [Platform.BUTTON])
 
     assert set(hass.states.async_entity_ids("button")) == {
-        "button.b_d_garage_pet",
-        "button.b_d_garage_parcel",
-        "button.b_d_garage_ventilation",
+        "button.b_d_garage_partial_1",
+        "button.b_d_garage_partial_2",
+        "button.b_d_garage_partial_3",
     }
 
 
@@ -105,7 +105,13 @@ async def test_button_name_updates_when_hub_title_changes(
     mock_config_entry: MockConfigEntry,
     mock_client: AsyncMock,
 ) -> None:
-    """Test the button's name is read live, reflecting a rename in the vendor app."""
+    """Test the button's name is read live, reflecting a rename in the vendor app.
+
+    Also implicitly confirms entity_id stability: PET_ENTITY_ID (whose
+    object_id is position-based, not title-based) still resolves after the
+    title changes - if entity_id had been derived from the title, this
+    lookup would fail after the rename.
+    """
     mock_client.async_get_status.return_value = DoorStatus(
         state=DoorState.CLOSED,
         position=0,
