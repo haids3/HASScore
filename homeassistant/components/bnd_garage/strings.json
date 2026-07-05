@@ -37,12 +37,5 @@
         "description": "Pair a new phone with your B&D SmartDoorDevices hub. Generate an activation code in the B&D Smart Garage Access app under Settings → Users → your hub → Add new user, and set a password for that user."
       }
     }
-  },
-  "entity": {
-    "button": {
-      "calibrate": {
-        "name": "Calibrate travel time"
-      }
-    }
   }
 }

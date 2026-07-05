@@ -1,12 +1,12 @@
 """Test the B&D Garage cover entity."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 from bnd_garage_api.exceptions import CannotConnect, HubCommandError, InvalidAuth
 from bnd_garage_api.models import DoorState, DoorStatus
 import pytest
 
-from homeassistant.components.cover import ATTR_POSITION, CoverEntityFeature
+from homeassistant.components.cover import CoverEntityFeature
 from homeassistant.const import ATTR_ENTITY_ID, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -29,14 +29,11 @@ async def setup_cover(
 
 
 async def test_supported_features(hass: HomeAssistant) -> None:
-    """Test the cover advertises open/close/stop/set-position."""
+    """Test the cover advertises open/close/stop."""
     state = hass.states.get(ENTITY_ID)
     assert state is not None
     assert state.attributes["supported_features"] == (
-        CoverEntityFeature.OPEN
-        | CoverEntityFeature.CLOSE
-        | CoverEntityFeature.STOP
-        | CoverEntityFeature.SET_POSITION
+        CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
     )
 
 
@@ -171,39 +168,4 @@ async def test_command_errors(
     with pytest.raises(HomeAssistantError):
         await hass.services.async_call(
             "cover", "open_cover", {ATTR_ENTITY_ID: ENTITY_ID}, blocking=True
-        )
-
-
-async def test_set_position(hass: HomeAssistant, mock_client: AsyncMock) -> None:
-    """Test the set_cover_position service delegates to the coordinator."""
-    with patch(
-        "homeassistant.components.bnd_garage.coordinator.async_set_position",
-        AsyncMock(
-            return_value=DoorStatus(state=DoorState.PARTIAL, position=40, rate=0)
-        ),
-    ) as mock_set_position:
-        await hass.services.async_call(
-            "cover",
-            "set_cover_position",
-            {ATTR_ENTITY_ID: ENTITY_ID, ATTR_POSITION: 40},
-            blocking=True,
-        )
-
-    assert mock_set_position.await_args.args[2] == 40
-
-
-async def test_set_position_error(hass: HomeAssistant, mock_client: AsyncMock) -> None:
-    """Test set_cover_position failures surface as HomeAssistantError."""
-    with (
-        patch(
-            "homeassistant.components.bnd_garage.coordinator.async_set_position",
-            AsyncMock(side_effect=CannotConnect("boom")),
-        ),
-        pytest.raises(HomeAssistantError),
-    ):
-        await hass.services.async_call(
-            "cover",
-            "set_cover_position",
-            {ATTR_ENTITY_ID: ENTITY_ID, ATTR_POSITION: 40},
-            blocking=True,
         )
