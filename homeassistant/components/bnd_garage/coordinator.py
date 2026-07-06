@@ -15,7 +15,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .calibration import CalibrationCurve, build_curve
-from .const import DOMAIN, EVENT_ACTIVITY
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,7 +53,6 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
         self._segment_is_opening: bool | None = None
         self._segment_start_position: float = 0
         self._pending_preset_cmd: int | None = None
-        self._last_activity_log_id: int | None = None
         self.open_curve = CalibrationCurve.from_json(
             config_entry.options.get(CONF_OPEN_CURVE)
         )
@@ -76,8 +75,6 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
             raise ConfigEntryAuthFailed from err
         except HubUnreachableError as err:
             raise UpdateFailed(str(err)) from err
-
-        self._maybe_fire_activity_event(status)
 
         if status.state == DoorState.MOVING:
             self._advance_position_estimate(status)
@@ -189,28 +186,6 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
                     str(cmd): position
                     for cmd, position in self._preset_positions.items()
                 },
-            },
-        )
-
-    def _maybe_fire_activity_event(self, status: HubStatus) -> None:
-        """Fire an event when the hub reports a new activity-log entry.
-
-        The hub keeps exactly one entry, updated in place for every action
-        (from any source - the app or us) - `log_id` is the only way to
-        tell a genuinely new entry from the same one returned by a repeat
-        poll. `logbook.py` turns this into a human-readable Logbook line.
-        """
-        activity = status.activity
-        if activity is None or activity.log_id == self._last_activity_log_id:
-            return
-        self._last_activity_log_id = activity.log_id
-        self.hass.bus.async_fire(
-            EVENT_ACTIVITY,
-            {
-                "text": activity.text,
-                "log_id": activity.log_id,
-                "logged_at": activity.logged_at,
-                "alert": activity.alert,
             },
         )
 
