@@ -2,10 +2,12 @@
 
 from unittest.mock import AsyncMock, patch
 
+from bnd_garage_client import ActivityLogEntry
 from bnd_garage_client.models import DoorState, HubStatus
 import pytest
 
 from homeassistant.components.bnd_garage.calibration import CalibrationCurve
+from homeassistant.components.bnd_garage.const import EVENT_ACTIVITY
 from homeassistant.components.bnd_garage.coordinator import (
     MOVING_UPDATE_INTERVAL,
     UPDATE_INTERVAL,
@@ -14,7 +16,7 @@ from homeassistant.core import HomeAssistant
 
 from . import setup_integration
 
-from tests.common import MockConfigEntry
+from tests.common import MockConfigEntry, async_capture_events
 
 
 @pytest.mark.parametrize(
@@ -462,6 +464,80 @@ async def test_auto_calibrate_skips_movement_stopped_short_of_extreme(
 
     assert coordinator.open_curve is None
     assert "open_curve" not in mock_config_entry.options
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_fires_event_on_new_activity_log_entry(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test a new activity-log entry fires EVENT_ACTIVITY with its details."""
+    events = async_capture_events(hass, EVENT_ACTIVITY)
+    mock_client.get_status.return_value = HubStatus(
+        state=DoorState.CLOSED,
+        position=0,
+        rate=0,
+        activity=ActivityLogEntry(
+            text="Closed by HomeAssistant", log_id=123, logged_at=1783233784793, alert=0
+        ),
+    )
+    await setup_integration(hass, mock_config_entry, [])
+
+    assert len(events) == 1
+    assert events[0].data == {
+        "text": "Closed by HomeAssistant",
+        "log_id": 123,
+        "logged_at": 1783233784793,
+        "alert": 0,
+    }
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_does_not_refire_event_for_same_log_id(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test a repeat poll returning the same log_id doesn't fire a duplicate event."""
+    events = async_capture_events(hass, EVENT_ACTIVITY)
+    mock_client.get_status.return_value = HubStatus(
+        state=DoorState.CLOSED,
+        position=0,
+        rate=0,
+        activity=ActivityLogEntry(
+            text="Closed by HomeAssistant", log_id=123, logged_at=1783233784793, alert=0
+        ),
+    )
+    await setup_integration(hass, mock_config_entry, [])
+    coordinator = mock_config_entry.runtime_data
+
+    await coordinator.async_refresh()
+    await coordinator.async_refresh()
+
+    assert len(events) == 1
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_no_event_when_hub_reports_no_activity(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test no event fires if the hub never reports an activity log."""
+    events = async_capture_events(hass, EVENT_ACTIVITY)
+    mock_client.get_status.return_value = HubStatus(
+        state=DoorState.CLOSED, position=0, rate=0
+    )
+    await setup_integration(hass, mock_config_entry, [])
+
+    assert len(events) == 0
 
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()

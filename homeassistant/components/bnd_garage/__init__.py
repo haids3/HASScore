@@ -17,7 +17,12 @@ from .const import (
 )
 from .coordinator import BndGarageConfigEntry, BndGarageDataUpdateCoordinator
 
-_PLATFORMS: list[Platform] = [Platform.BUTTON, Platform.COVER, Platform.LIGHT]
+_PLATFORMS: list[Platform] = [
+    Platform.BUTTON,
+    Platform.COVER,
+    Platform.LIGHT,
+    Platform.SENSOR,
+]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: BndGarageConfigEntry) -> bool:

@@ -43,6 +43,11 @@
       "hub_light": {
         "name": "Light"
       }
+    },
+    "sensor": {
+      "last_activity": {
+        "name": "Last activity"
+      }
     }
   }
 }
