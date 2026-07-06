@@ -2,7 +2,11 @@
 
 from typing import override
 
-from bnd_garage_api.exceptions import CannotConnect, HubCommandError, InvalidAuth
+from bnd_garage_client.errors import (
+    AuthenticationError,
+    HubCommandError,
+    HubUnreachableError,
+)
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.core import HomeAssistant
@@ -23,7 +27,7 @@ async def async_setup_entry(
     """Set up a button for each position preset the hub currently reports."""
     coordinator = entry.runtime_data
     async_add_entities(
-        BndGaragePresetButton(coordinator, index, preset.cmd)
+        BndGaragePresetButton(coordinator, index, preset.command)
         for index, preset in enumerate(coordinator.data.presets)
     )
 
@@ -54,8 +58,8 @@ class BndGaragePresetButton(BndGarageEntity, ButtonEntity):
     def name(self) -> str | None:
         """Return the preset's current title, as configured in the vendor app."""
         for preset in self.coordinator.data.presets:
-            if preset.cmd == self._cmd:
-                return preset.title
+            if preset.command == self._cmd:
+                return preset.label
         return None
 
     @property
@@ -69,7 +73,7 @@ class BndGaragePresetButton(BndGarageEntity, ButtonEntity):
     def available(self) -> bool:
         """Return whether the hub still reports this preset."""
         return super().available and any(
-            preset.cmd == self._cmd for preset in self.coordinator.data.presets
+            preset.command == self._cmd for preset in self.coordinator.data.presets
         )
 
     @property
@@ -84,5 +88,5 @@ class BndGaragePresetButton(BndGarageEntity, ButtonEntity):
         """Trigger this preset."""
         try:
             await self.coordinator.async_activate_preset(self._cmd)
-        except (HubCommandError, CannotConnect, InvalidAuth) as err:
+        except (HubCommandError, AuthenticationError, HubUnreachableError) as err:
             raise HomeAssistantError(str(err)) from err

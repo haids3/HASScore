@@ -4,8 +4,12 @@ from collections.abc import Mapping
 import logging
 from typing import Any, override
 
-from bnd_garage_api import Credentials, async_register
-from bnd_garage_api.exceptions import CannotConnect, InvalidAuth, MultipleDevicesFound
+from bnd_garage_client import Credentials, pair_new_phone
+from bnd_garage_client.errors import (
+    AmbiguousDeviceError,
+    AuthenticationError,
+    HubUnreachableError,
+)
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
@@ -47,9 +51,9 @@ def _credentials_to_entry_data(host: str, credentials: Credentials) -> dict[str,
         CONF_HUB_ID: credentials.hub_id,
         CONF_PHONE_ID: credentials.phone_id,
         CONF_PHONE_PASSWORD: credentials.phone_password,
-        CONF_PHONE_SECRET: credentials.phone_secret,
+        CONF_PHONE_SECRET: credentials.control_secret,
         CONF_USER_PASSWORD: credentials.user_password,
-        CONF_ACTION_DEVICE_ID: credentials.action_device_id,
+        CONF_ACTION_DEVICE_ID: credentials.device_id,
     }
 
 
@@ -66,17 +70,17 @@ class BndGarageConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
-                credentials = await async_register(
+                credentials = await pair_new_phone(
                     async_get_clientsession(self.hass),
                     user_input[CONF_HOST],
                     user_input[CONF_ACTIVATION_CODE],
                     user_input[CONF_USER_PASSWORD],
                 )
-            except InvalidAuth:
+            except AuthenticationError:
                 errors["base"] = "invalid_auth"
-            except CannotConnect:
+            except HubUnreachableError:
                 errors["base"] = "cannot_connect"
-            except MultipleDevicesFound:
+            except AmbiguousDeviceError:
                 errors["base"] = "multiple_devices_found"
             except Exception:
                 _LOGGER.exception("Unexpected exception during pairing")
@@ -108,17 +112,17 @@ class BndGarageConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             try:
-                credentials = await async_register(
+                credentials = await pair_new_phone(
                     async_get_clientsession(self.hass),
                     reauth_entry.data[CONF_HOST],
                     user_input[CONF_ACTIVATION_CODE],
                     user_input[CONF_USER_PASSWORD],
                 )
-            except InvalidAuth:
+            except AuthenticationError:
                 errors["base"] = "invalid_auth"
-            except CannotConnect:
+            except HubUnreachableError:
                 errors["base"] = "cannot_connect"
-            except MultipleDevicesFound:
+            except AmbiguousDeviceError:
                 errors["base"] = "multiple_devices_found"
             except Exception:
                 _LOGGER.exception("Unexpected exception during re-pairing")

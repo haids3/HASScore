@@ -8,5 +8,5 @@
   "integration_type": "hub",
   "iot_class": "local_polling",
   "quality_scale": "bronze",
-  "requirements": ["bnd-garage-api==0.1.0"]
+  "requirements": ["bnd-garage-client==0.1.0"]
 }

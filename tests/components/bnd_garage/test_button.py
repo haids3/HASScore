@@ -2,9 +2,9 @@
 
 from unittest.mock import AsyncMock
 
-from bnd_garage_api import AuxAction
-from bnd_garage_api.exceptions import CannotConnect
-from bnd_garage_api.models import DoorState, DoorStatus
+from bnd_garage_client import PresetAction
+from bnd_garage_client.errors import HubUnreachableError
+from bnd_garage_client.models import DoorState, HubStatus
 import pytest
 
 from homeassistant.components.bnd_garage.coordinator import CONF_PRESET_POSITIONS
@@ -25,7 +25,7 @@ async def test_no_buttons_created_when_hub_reports_no_presets(
     mock_client: AsyncMock,
 ) -> None:
     """Test no button entities are created if the hub reports no presets."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED, position=0, rate=0
     )
     await setup_integration(hass, mock_config_entry, [Platform.BUTTON])
@@ -39,14 +39,14 @@ async def test_a_button_is_created_per_preset(
     mock_client: AsyncMock,
 ) -> None:
     """Test one button entity is created for each preset the hub reports."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED,
         position=0,
         rate=0,
         presets=(
-            AuxAction(cmd=5, title="Pet"),
-            AuxAction(cmd=6, title="Parcel"),
-            AuxAction(cmd=7, title="Ventilation"),
+            PresetAction(command=5, label="Pet"),
+            PresetAction(command=6, label="Parcel"),
+            PresetAction(command=7, label="Ventilation"),
         ),
     )
     await setup_integration(hass, mock_config_entry, [Platform.BUTTON])
@@ -64,11 +64,11 @@ async def test_button_press_activates_preset(
     mock_client: AsyncMock,
 ) -> None:
     """Test pressing a preset button sends its cmd code to the hub."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED,
         position=0,
         rate=0,
-        presets=(AuxAction(cmd=5, title="Pet"),),
+        presets=(PresetAction(command=5, label="Pet"),),
     )
     await setup_integration(hass, mock_config_entry, [Platform.BUTTON])
 
@@ -76,7 +76,7 @@ async def test_button_press_activates_preset(
         "button", "press", {ATTR_ENTITY_ID: PET_ENTITY_ID}, blocking=True
     )
 
-    mock_client.async_send_command.assert_awaited_once_with(5)
+    mock_client.send_command.assert_awaited_once_with(5)
 
 
 async def test_button_press_error_surfaces_as_home_assistant_error(
@@ -85,14 +85,14 @@ async def test_button_press_error_surfaces_as_home_assistant_error(
     mock_client: AsyncMock,
 ) -> None:
     """Test a hub command failure while pressing surfaces as HomeAssistantError."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED,
         position=0,
         rate=0,
-        presets=(AuxAction(cmd=5, title="Pet"),),
+        presets=(PresetAction(command=5, label="Pet"),),
     )
     await setup_integration(hass, mock_config_entry, [Platform.BUTTON])
-    mock_client.async_send_command.side_effect = CannotConnect("boom")
+    mock_client.send_command.side_effect = HubUnreachableError("boom")
 
     with pytest.raises(HomeAssistantError):
         await hass.services.async_call(
@@ -112,20 +112,20 @@ async def test_button_name_updates_when_hub_title_changes(
     title changes - if entity_id had been derived from the title, this
     lookup would fail after the rename.
     """
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED,
         position=0,
         rate=0,
-        presets=(AuxAction(cmd=5, title="Pet"),),
+        presets=(PresetAction(command=5, label="Pet"),),
     )
     await setup_integration(hass, mock_config_entry, [Platform.BUTTON])
     coordinator = mock_config_entry.runtime_data
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED,
         position=0,
         rate=0,
-        presets=(AuxAction(cmd=5, title="Doggy Door"),),
+        presets=(PresetAction(command=5, label="Doggy Door"),),
     )
     await coordinator.async_refresh()
 
@@ -140,16 +140,16 @@ async def test_button_becomes_unavailable_if_preset_removed(
     mock_client: AsyncMock,
 ) -> None:
     """Test the button becomes unavailable if the hub stops reporting it."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED,
         position=0,
         rate=0,
-        presets=(AuxAction(cmd=5, title="Pet"),),
+        presets=(PresetAction(command=5, label="Pet"),),
     )
     await setup_integration(hass, mock_config_entry, [Platform.BUTTON])
     coordinator = mock_config_entry.runtime_data
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED, position=0, rate=0, presets=()
     )
     await coordinator.async_refresh()
@@ -165,31 +165,31 @@ async def test_last_position_recorded_after_preset_settles(
     mock_client: AsyncMock,
 ) -> None:
     """Test the position the door settles at after a preset press gets saved."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED,
         position=0,
         rate=0,
-        presets=(AuxAction(cmd=5, title="Pet"),),
+        presets=(PresetAction(command=5, label="Pet"),),
     )
     await setup_integration(hass, mock_config_entry, [Platform.BUTTON])
 
     # The refresh triggered by the button press itself sees the door already
     # moving (matches every real hub response captured so far).
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING,
         position=0,
         rate=7,
-        presets=(AuxAction(cmd=5, title="Pet"),),
+        presets=(PresetAction(command=5, label="Pet"),),
     )
     await hass.services.async_call(
         "button", "press", {ATTR_ENTITY_ID: PET_ENTITY_ID}, blocking=True
     )
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.PARTIAL,
         position=16,
         rate=0,
-        presets=(AuxAction(cmd=5, title="Pet"),),
+        presets=(PresetAction(command=5, label="Pet"),),
     )
     await mock_config_entry.runtime_data.async_refresh()
 

@@ -3,8 +3,12 @@
 from collections.abc import Awaitable, Callable
 from typing import Any, override
 
-from bnd_garage_api.exceptions import CannotConnect, HubCommandError, InvalidAuth
-from bnd_garage_api.models import DoorState
+from bnd_garage_client.errors import (
+    AuthenticationError,
+    HubCommandError,
+    HubUnreachableError,
+)
+from bnd_garage_client.models import DoorState
 
 from homeassistant.components.cover import (
     CoverDeviceClass,
@@ -76,21 +80,21 @@ class BndGarageCover(BndGarageEntity, CoverEntity):
     @override
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the garage door."""
-        await self._async_send_command(self.coordinator.client.async_open)
+        await self._async_send_command(self.coordinator.client.open_door)
 
     @override
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the garage door."""
-        await self._async_send_command(self.coordinator.client.async_close_door)
+        await self._async_send_command(self.coordinator.client.close_door)
 
     @override
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the garage door."""
-        await self._async_send_command(self.coordinator.client.async_stop)
+        await self._async_send_command(self.coordinator.client.stop_door)
 
     async def _async_send_command(self, command: Callable[[], Awaitable[None]]) -> None:
         try:
             await command()
-        except (HubCommandError, CannotConnect, InvalidAuth) as err:
+        except (HubCommandError, AuthenticationError, HubUnreachableError) as err:
             raise HomeAssistantError(str(err)) from err
         await self.coordinator.async_request_refresh()

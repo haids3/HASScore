@@ -2,7 +2,11 @@
 
 from unittest.mock import AsyncMock
 
-from bnd_garage_api.exceptions import CannotConnect, InvalidAuth, MultipleDevicesFound
+from bnd_garage_client.errors import (
+    AmbiguousDeviceError,
+    AuthenticationError,
+    HubUnreachableError,
+)
 import pytest
 
 from homeassistant.components.bnd_garage.const import (
@@ -48,7 +52,7 @@ async def test_form(
     assert result["title"] == "B&D Garage"
     assert result["data"][CONF_HOST] == TEST_HOST
     assert result["data"][CONF_HUB_ID] == TEST_CREDENTIALS.hub_id
-    assert result["data"][CONF_ACTION_DEVICE_ID] == TEST_CREDENTIALS.action_device_id
+    assert result["data"][CONF_ACTION_DEVICE_ID] == TEST_CREDENTIALS.device_id
     assert result["result"].unique_id == TEST_CREDENTIALS.hub_id
     assert len(mock_setup_entry.mock_calls) == 1
 
@@ -56,20 +60,21 @@ async def test_form(
 @pytest.mark.parametrize(
     ("side_effect", "expected_error"),
     [
-        (InvalidAuth, "invalid_auth"),
-        (CannotConnect, "cannot_connect"),
-        (
-            MultipleDevicesFound([("door 1", "id1"), ("door 2", "id2")]),
+        pytest.param(AuthenticationError, "invalid_auth", id="invalid_auth"),
+        pytest.param(HubUnreachableError, "cannot_connect", id="cannot_connect"),
+        pytest.param(
+            AmbiguousDeviceError([("door 1", "id1"), ("door 2", "id2")]),
             "multiple_devices_found",
+            id="multiple_devices_found",
         ),
-        (Exception, "unknown"),
+        pytest.param(Exception, "unknown", id="unknown"),
     ],
 )
 @pytest.mark.usefixtures("mock_setup_entry")
 async def test_form_exceptions(
     hass: HomeAssistant,
     mock_register: AsyncMock,
-    side_effect: Exception,
+    side_effect: type[Exception],
     expected_error: str,
 ) -> None:
     """Test we handle pairing errors and can then recover."""
@@ -153,17 +158,24 @@ async def test_reauth(
     assert result["reason"] == "reauth_successful"
     assert len(hass.config_entries.async_entries()) == 1
 
+    await hass.async_block_till_done()
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
 
 @pytest.mark.parametrize(
     ("side_effect", "expected_error"),
-    [(InvalidAuth, "invalid_auth"), (CannotConnect, "cannot_connect")],
+    [
+        pytest.param(AuthenticationError, "invalid_auth", id="invalid_auth"),
+        pytest.param(HubUnreachableError, "cannot_connect", id="cannot_connect"),
+    ],
 )
 async def test_reauth_exceptions(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_client: AsyncMock,
     mock_register: AsyncMock,
-    side_effect: Exception,
+    side_effect: type[Exception],
     expected_error: str,
 ) -> None:
     """Test we handle re-pairing errors and can then recover."""
@@ -194,3 +206,7 @@ async def test_reauth_exceptions(
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
+
+    await hass.async_block_till_done()
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()

@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock
 
-from bnd_garage_api.exceptions import CannotConnect, InvalidAuth
+from bnd_garage_client.errors import AuthenticationError, HubUnreachableError
 import pytest
 
 from homeassistant.config_entries import ConfigEntryState
@@ -25,13 +25,13 @@ async def test_setup_and_unload(
     await setup_integration(hass, mock_config_entry, [])
 
     assert mock_config_entry.state is ConfigEntryState.LOADED
-    mock_client.async_connect.assert_awaited_once()
+    mock_client.connect.assert_awaited_once()
 
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
 
     assert mock_config_entry.state is ConfigEntryState.NOT_LOADED
-    mock_client.async_close.assert_awaited_once()
+    mock_client.close.assert_awaited_once()
 
 
 async def test_setup_invalid_auth(
@@ -40,11 +40,11 @@ async def test_setup_invalid_auth(
     mock_client: AsyncMock,
 ) -> None:
     """Test that an auth failure during setup marks the entry as an error."""
-    mock_client.async_connect.side_effect = InvalidAuth
+    mock_client.connect.side_effect = AuthenticationError
     await setup_integration(hass, mock_config_entry, [])
 
     assert mock_config_entry.state is ConfigEntryState.SETUP_ERROR
-    mock_client.async_close.assert_awaited_once()
+    mock_client.close.assert_awaited_once()
 
 
 async def test_setup_cannot_connect(
@@ -53,11 +53,11 @@ async def test_setup_cannot_connect(
     mock_client: AsyncMock,
 ) -> None:
     """Test that a connection failure during setup schedules a retry."""
-    mock_client.async_connect.side_effect = CannotConnect
+    mock_client.connect.side_effect = HubUnreachableError
     await setup_integration(hass, mock_config_entry, [])
 
     assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
-    mock_client.async_close.assert_awaited_once()
+    mock_client.close.assert_awaited_once()
 
 
 @pytest.mark.usefixtures("mock_client")

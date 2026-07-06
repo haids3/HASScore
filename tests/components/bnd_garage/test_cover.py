@@ -2,8 +2,12 @@
 
 from unittest.mock import AsyncMock
 
-from bnd_garage_api.exceptions import CannotConnect, HubCommandError, InvalidAuth
-from bnd_garage_api.models import DoorState, DoorStatus
+from bnd_garage_client.errors import (
+    AuthenticationError,
+    HubCommandError,
+    HubUnreachableError,
+)
+from bnd_garage_client.models import DoorState, HubStatus
 import pytest
 
 from homeassistant.components.cover import CoverEntityFeature
@@ -41,19 +45,19 @@ async def test_supported_features(hass: HomeAssistant) -> None:
     ("status", "expected_position", "expected_is_closed"),
     [
         pytest.param(
-            DoorStatus(state=DoorState.CLOSED, position=0, rate=0),
+            HubStatus(state=DoorState.CLOSED, position=0, rate=0),
             0,
             True,
             id="closed",
         ),
         pytest.param(
-            DoorStatus(state=DoorState.OPEN, position=100, rate=0),
+            HubStatus(state=DoorState.OPEN, position=100, rate=0),
             100,
             False,
             id="open",
         ),
         pytest.param(
-            DoorStatus(state=DoorState.PARTIAL, position=42, rate=0),
+            HubStatus(state=DoorState.PARTIAL, position=42, rate=0),
             42,
             False,
             id="partial",
@@ -64,12 +68,12 @@ async def test_position_and_closed_state(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_client: AsyncMock,
-    status: DoorStatus,
+    status: HubStatus,
     expected_position: int,
     expected_is_closed: bool,
 ) -> None:
     """Test the reported position and closed state track the hub status."""
-    mock_client.async_get_status.return_value = status
+    mock_client.get_status.return_value = status
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
 
@@ -85,7 +89,7 @@ async def test_unknown_position_is_not_reported(
     mock_client: AsyncMock,
 ) -> None:
     """Test an unknown hub-reported position surfaces as no position, not -1."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.UNKNOWN, position=-1, rate=0
     )
     await mock_config_entry.runtime_data.async_refresh()
@@ -113,7 +117,7 @@ async def test_moving_state(
     expected_closing: bool,
 ) -> None:
     """Test opening/closing are derived from the hub's reported rate."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING if rate else DoorState.CLOSED,
         position=50,
         rate=rate,
@@ -130,9 +134,9 @@ async def test_moving_state(
 @pytest.mark.parametrize(
     ("service", "client_method"),
     [
-        pytest.param("open_cover", "async_open", id="open"),
-        pytest.param("close_cover", "async_close_door", id="close"),
-        pytest.param("stop_cover", "async_stop", id="stop"),
+        pytest.param("open_cover", "open_door", id="open"),
+        pytest.param("close_cover", "close_door", id="close"),
+        pytest.param("stop_cover", "stop_door", id="stop"),
     ],
 )
 async def test_commands(
@@ -153,8 +157,8 @@ async def test_commands(
     "side_effect",
     [
         pytest.param(HubCommandError(16, "boom"), id="hub_command_error"),
-        pytest.param(CannotConnect("boom"), id="cannot_connect"),
-        pytest.param(InvalidAuth("boom"), id="invalid_auth"),
+        pytest.param(HubUnreachableError("boom"), id="cannot_connect"),
+        pytest.param(AuthenticationError("boom"), id="invalid_auth"),
     ],
 )
 async def test_command_errors(
@@ -163,7 +167,7 @@ async def test_command_errors(
     side_effect: Exception,
 ) -> None:
     """Test hub command failures surface as HomeAssistantError."""
-    mock_client.async_open.side_effect = side_effect
+    mock_client.open_door.side_effect = side_effect
 
     with pytest.raises(HomeAssistantError):
         await hass.services.async_call(

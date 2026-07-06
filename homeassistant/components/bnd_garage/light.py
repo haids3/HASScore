@@ -2,7 +2,11 @@
 
 from typing import Any, override
 
-from bnd_garage_api.exceptions import CannotConnect, HubCommandError, InvalidAuth
+from bnd_garage_client.errors import (
+    AuthenticationError,
+    HubCommandError,
+    HubUnreachableError,
+)
 
 from homeassistant.components.light import ColorMode, LightEntity
 from homeassistant.core import HomeAssistant
@@ -54,7 +58,7 @@ class BndGarageLight(BndGarageEntity, LightEntity):
         if light is None or light.is_on == want_on:
             return
         try:
-            await self.coordinator.client.async_send_command(light.cmd)
-        except (HubCommandError, CannotConnect, InvalidAuth) as err:
+            await self.coordinator.client.send_command(light.command)
+        except (HubCommandError, AuthenticationError, HubUnreachableError) as err:
             raise HomeAssistantError(str(err)) from err
         await self.coordinator.async_request_refresh()

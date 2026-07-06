@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock, patch
 
-from bnd_garage_api.models import DoorState, DoorStatus
+from bnd_garage_client.models import DoorState, HubStatus
 import pytest
 
 from homeassistant.components.bnd_garage.calibration import CalibrationCurve
@@ -34,7 +34,7 @@ async def test_poll_interval_tracks_door_state(
     expected_interval: object,
 ) -> None:
     """Test the coordinator speeds up while the door is moving and slows back down."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=state, position=50, rate=5 if state == DoorState.MOVING else 0
     )
     await setup_integration(hass, mock_config_entry, [])
@@ -51,14 +51,14 @@ async def test_poll_interval_reverts_after_movement_stops(
     mock_client: AsyncMock,
 ) -> None:
     """Test the interval returns to normal once the door stops moving."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=50, rate=5
     )
     await setup_integration(hass, mock_config_entry, [])
     coordinator = mock_config_entry.runtime_data
     assert coordinator.update_interval == MOVING_UPDATE_INTERVAL
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.OPEN, position=100, rate=0
     )
     await coordinator.async_refresh()
@@ -75,7 +75,7 @@ async def test_moving_position_is_estimated_from_elapsed_time(
     mock_client: AsyncMock,
 ) -> None:
     """Test position is extrapolated locally from elapsed time and rate."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED, position=0, rate=0
     )
     with patch(
@@ -85,7 +85,7 @@ async def test_moving_position_is_estimated_from_elapsed_time(
         await setup_integration(hass, mock_config_entry, [])
     coordinator = mock_config_entry.runtime_data
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=0, rate=10
     )
     with patch(
@@ -112,7 +112,7 @@ async def test_moving_position_picks_up_rate_drift_mid_travel(
     mock_client: AsyncMock,
 ) -> None:
     """Test a same-direction rate change is picked up within one poll."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED, position=0, rate=0
     )
     with patch(
@@ -122,7 +122,7 @@ async def test_moving_position_picks_up_rate_drift_mid_travel(
         await setup_integration(hass, mock_config_entry, [])
     coordinator = mock_config_entry.runtime_data
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=0, rate=10
     )
     with patch(
@@ -139,7 +139,7 @@ async def test_moving_position_picks_up_rate_drift_mid_travel(
     assert coordinator.data.position == 20  # 0 + 10%/s * 2s
 
     # Same direction, but the hub now reports a slower rate.
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=0, rate=5
     )
     with patch(
@@ -166,7 +166,7 @@ async def test_moving_position_reanchors_on_direction_reversal(
     mock_client: AsyncMock,
 ) -> None:
     """Test a mid-travel direction reversal re-anchors from the current estimate."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED, position=0, rate=0
     )
     with patch(
@@ -176,7 +176,7 @@ async def test_moving_position_reanchors_on_direction_reversal(
         await setup_integration(hass, mock_config_entry, [])
     coordinator = mock_config_entry.runtime_data
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=0, rate=10
     )
     with patch(
@@ -192,7 +192,7 @@ async def test_moving_position_reanchors_on_direction_reversal(
         await coordinator.async_refresh()
     assert coordinator.data.position == 30  # 0 + 10%/s * 3s
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=0, rate=-10
     )
     with patch(
@@ -221,7 +221,7 @@ async def test_moving_position_uses_calibrated_curve(
     mock_client: AsyncMock,
 ) -> None:
     """Test a calibrated curve is used instead of the flat-rate estimate."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED, position=0, rate=0
     )
     with patch(
@@ -232,7 +232,7 @@ async def test_moving_position_uses_calibrated_curve(
     coordinator = mock_config_entry.runtime_data
     coordinator.open_curve = CalibrationCurve(points=((0, 0), (5, 40), (10, 100)))
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=0, rate=10
     )
     with patch(
@@ -259,7 +259,7 @@ async def test_moving_position_ignores_curve_when_not_starting_at_reference(
     mock_client: AsyncMock,
 ) -> None:
     """Test a movement starting mid-travel falls back to the flat-rate estimate."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.PARTIAL, position=30, rate=0
     )
     with patch(
@@ -270,7 +270,7 @@ async def test_moving_position_ignores_curve_when_not_starting_at_reference(
     coordinator = mock_config_entry.runtime_data
     coordinator.open_curve = CalibrationCurve(points=((0, 0), (5, 40), (10, 100)))
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=30, rate=10
     )
     with patch(
@@ -296,7 +296,7 @@ async def test_auto_calibrates_from_full_open_movement(
     mock_client: AsyncMock,
 ) -> None:
     """Test a normal full open passively builds the open curve."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED, position=0, rate=0
     )
     with patch(
@@ -307,7 +307,7 @@ async def test_auto_calibrates_from_full_open_movement(
     coordinator = mock_config_entry.runtime_data
     assert coordinator.open_curve is None
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=0, rate=10
     )
     with patch(
@@ -316,7 +316,7 @@ async def test_auto_calibrates_from_full_open_movement(
     ):
         await coordinator.async_refresh()
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.OPEN, position=100, rate=0
     )
     with patch(
@@ -340,7 +340,7 @@ async def test_auto_calibrates_from_full_close_movement(
     mock_client: AsyncMock,
 ) -> None:
     """Test a normal full close passively builds the close curve."""
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.OPEN, position=100, rate=0
     )
     with patch(
@@ -350,7 +350,7 @@ async def test_auto_calibrates_from_full_close_movement(
         await setup_integration(hass, mock_config_entry, [])
     coordinator = mock_config_entry.runtime_data
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=100, rate=-10
     )
     with patch(
@@ -359,7 +359,7 @@ async def test_auto_calibrates_from_full_close_movement(
     ):
         await coordinator.async_refresh()
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED, position=0, rate=0
     )
     with patch(
@@ -387,7 +387,7 @@ async def test_auto_calibrate_skips_movement_not_starting_at_extreme(
     That segment can't represent the full 0-100 range, so a curve built
     from it would never match a real future full-range movement anyway.
     """
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.PARTIAL, position=30, rate=0
     )
     with patch(
@@ -397,7 +397,7 @@ async def test_auto_calibrate_skips_movement_not_starting_at_extreme(
         await setup_integration(hass, mock_config_entry, [])
     coordinator = mock_config_entry.runtime_data
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=30, rate=10
     )
     with patch(
@@ -406,7 +406,7 @@ async def test_auto_calibrate_skips_movement_not_starting_at_extreme(
     ):
         await coordinator.async_refresh()
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.OPEN, position=100, rate=0
     )
     with patch(
@@ -432,7 +432,7 @@ async def test_auto_calibrate_skips_movement_stopped_short_of_extreme(
     E.g. an obstruction safety-stop partway through - that's not a
     representative full-range measurement.
     """
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED, position=0, rate=0
     )
     with patch(
@@ -442,7 +442,7 @@ async def test_auto_calibrate_skips_movement_stopped_short_of_extreme(
         await setup_integration(hass, mock_config_entry, [])
     coordinator = mock_config_entry.runtime_data
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=0, rate=10
     )
     with patch(
@@ -451,7 +451,7 @@ async def test_auto_calibrate_skips_movement_stopped_short_of_extreme(
     ):
         await coordinator.async_refresh()
 
-    mock_client.async_get_status.return_value = DoorStatus(
+    mock_client.get_status.return_value = HubStatus(
         state=DoorState.PARTIAL, position=60, rate=0
     )
     with patch(

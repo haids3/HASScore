@@ -6,8 +6,8 @@ import logging
 import time
 from typing import override
 
-from bnd_garage_api import Client, DoorState, DoorStatus
-from bnd_garage_api.exceptions import CannotConnect, InvalidAuth
+from bnd_garage_client import DoorState, HubClient, HubStatus
+from bnd_garage_client.errors import AuthenticationError, HubUnreachableError
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -29,13 +29,13 @@ CONF_PRESET_POSITIONS = "preset_positions"
 type BndGarageConfigEntry = ConfigEntry[BndGarageDataUpdateCoordinator]
 
 
-class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[DoorStatus]):
+class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
     """Coordinator that polls the hub for the current door status."""
 
     config_entry: BndGarageConfigEntry
 
     def __init__(
-        self, hass: HomeAssistant, config_entry: BndGarageConfigEntry, client: Client
+        self, hass: HomeAssistant, config_entry: BndGarageConfigEntry, client: HubClient
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -67,13 +67,13 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[DoorStatus]):
         }
 
     @override
-    async def _async_update_data(self) -> DoorStatus:
+    async def _async_update_data(self) -> HubStatus:
         """Fetch the current door status from the hub."""
         try:
-            status = await self.client.async_get_status()
-        except InvalidAuth as err:
+            status = await self.client.get_status()
+        except AuthenticationError as err:
             raise ConfigEntryAuthFailed from err
-        except CannotConnect as err:
+        except HubUnreachableError as err:
             raise UpdateFailed(str(err)) from err
 
         if status.state == DoorState.MOVING:
@@ -96,7 +96,7 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[DoorStatus]):
         )
         return status
 
-    def _advance_position_estimate(self, status: DoorStatus) -> None:
+    def _advance_position_estimate(self, status: HubStatus) -> None:
         """Advance the position estimate for one poll while moving.
 
         Uses a calibrated travel curve (see calibration.py) when one covers
@@ -198,10 +198,10 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[DoorStatus]):
 
         Relies on the immediate refresh already seeing the door as MOVING
         (confirmed live: the hub reports a nonzero rate as soon as
-        async_send_command returns) - otherwise this poll would record the
+        send_command returns) - otherwise this poll would record the
         pre-move position as the preset's target instead of waiting for it
         to settle.
         """
-        await self.client.async_send_command(cmd)
+        await self.client.send_command(cmd)
         self._pending_preset_cmd = cmd
         await self.async_request_refresh()

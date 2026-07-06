@@ -1,7 +1,7 @@
 """The B&D Garage integration."""
 
-from bnd_garage_api import Client, Credentials
-from bnd_garage_api.exceptions import CannotConnect, InvalidAuth
+from bnd_garage_client import Credentials, HubClient
+from bnd_garage_client.errors import AuthenticationError, HubUnreachableError
 
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
@@ -26,19 +26,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: BndGarageConfigEntry) ->
         hub_id=entry.data[CONF_HUB_ID],
         phone_id=entry.data[CONF_PHONE_ID],
         phone_password=entry.data[CONF_PHONE_PASSWORD],
-        phone_secret=entry.data[CONF_PHONE_SECRET],
+        control_secret=entry.data[CONF_PHONE_SECRET],
         user_password=entry.data[CONF_USER_PASSWORD],
-        action_device_id=entry.data[CONF_ACTION_DEVICE_ID],
+        device_id=entry.data[CONF_ACTION_DEVICE_ID],
     )
-    client = Client(entry.data[CONF_HOST], credentials)
+    client = HubClient(entry.data[CONF_HOST], credentials)
 
     try:
-        await client.async_connect()
-    except InvalidAuth as err:
-        await client.async_close()
+        await client.connect()
+    except AuthenticationError as err:
+        await client.close()
         raise ConfigEntryAuthFailed from err
-    except CannotConnect as err:
-        await client.async_close()
+    except HubUnreachableError as err:
+        await client.close()
         raise ConfigEntryNotReady from err
 
     coordinator = BndGarageDataUpdateCoordinator(hass, entry, client)
@@ -54,6 +54,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: BndGarageConfigEntry) ->
 async def async_unload_entry(hass: HomeAssistant, entry: BndGarageConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, _PLATFORMS):
-        await entry.runtime_data.client.async_close()
+        await entry.runtime_data.client.close()
 
     return unload_ok
