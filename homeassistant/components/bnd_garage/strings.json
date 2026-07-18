@@ -48,6 +48,17 @@
       "last_activity": {
         "name": "Last activity"
       }
+    },
+    "switch": {
+      "auxiliary": {
+        "name": "Auxiliary"
+      },
+      "phone_lockout": {
+        "name": "Phone lockout"
+      },
+      "remote_control_lockout": {
+        "name": "Remote control lockout"
+      }
     }
   }
 }
