@@ -10,7 +10,7 @@ from bnd_garage_client.errors import (
 from bnd_garage_client.models import DoorState, HubStatus
 import pytest
 
-from homeassistant.components.cover import CoverEntityFeature
+from homeassistant.components.cover import ATTR_POSITION, CoverEntityFeature
 from homeassistant.const import ATTR_ENTITY_ID, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -33,11 +33,14 @@ async def setup_cover(
 
 
 async def test_supported_features(hass: HomeAssistant) -> None:
-    """Test the cover advertises open/close/stop."""
+    """Test the cover advertises open/close/stop/set_position."""
     state = hass.states.get(ENTITY_ID)
     assert state is not None
     assert state.attributes["supported_features"] == (
-        CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
+        CoverEntityFeature.OPEN
+        | CoverEntityFeature.CLOSE
+        | CoverEntityFeature.STOP
+        | CoverEntityFeature.SET_POSITION
     )
 
 
@@ -173,3 +176,59 @@ async def test_command_errors(
         await hass.services.async_call(
             "cover", "open_cover", {ATTR_ENTITY_ID: ENTITY_ID}, blocking=True
         )
+
+
+async def test_set_position_zero_closes(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+) -> None:
+    """Test setting position to 0 issues a full close, not a percent-open."""
+    await hass.services.async_call(
+        "cover",
+        "set_cover_position",
+        {ATTR_ENTITY_ID: ENTITY_ID, ATTR_POSITION: 0},
+        blocking=True,
+    )
+    mock_client.close_door.assert_awaited_once()
+    mock_client.set_open_percent.assert_not_awaited()
+
+
+async def test_set_position_hundred_opens(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+) -> None:
+    """Test setting position to 100 issues a full open, not a percent-open."""
+    await hass.services.async_call(
+        "cover",
+        "set_cover_position",
+        {ATTR_ENTITY_ID: ENTITY_ID, ATTR_POSITION: 100},
+        blocking=True,
+    )
+    mock_client.open_door.assert_awaited_once()
+    mock_client.set_open_percent.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("target", "expected_percent"),
+    [
+        pytest.param(50, 50, id="exact_step"),
+        pytest.param(42, 40, id="rounds_down"),
+        pytest.param(43, 45, id="rounds_up"),
+        pytest.param(3, 5, id="clamped_to_min"),
+        pytest.param(97, 95, id="clamped_to_max"),
+    ],
+)
+async def test_set_position_rounds_to_nearest_step(
+    hass: HomeAssistant,
+    mock_client: AsyncMock,
+    target: int,
+    expected_percent: int,
+) -> None:
+    """Test intermediate targets round to the hub's nearest 5% step."""
+    await hass.services.async_call(
+        "cover",
+        "set_cover_position",
+        {ATTR_ENTITY_ID: ENTITY_ID, ATTR_POSITION: target},
+        blocking=True,
+    )
+    mock_client.set_open_percent.assert_awaited_once_with(expected_percent)

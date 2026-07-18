@@ -3,6 +3,11 @@
 from collections.abc import Awaitable, Callable
 from typing import Any, override
 
+from bnd_garage_client.const import (
+    PERCENT_OPEN_MAX,
+    PERCENT_OPEN_MIN,
+    PERCENT_OPEN_STEP,
+)
 from bnd_garage_client.errors import (
     AuthenticationError,
     HubCommandError,
@@ -11,6 +16,7 @@ from bnd_garage_client.errors import (
 from bnd_garage_client.models import DoorState
 
 from homeassistant.components.cover import (
+    ATTR_POSITION,
     CoverDeviceClass,
     CoverEntity,
     CoverEntityFeature,
@@ -23,6 +29,19 @@ from .coordinator import BndGarageConfigEntry
 from .entity import BndGarageEntity
 
 PARALLEL_UPDATES = 1
+
+
+def _round_to_percent_step(target: int) -> int:
+    """Round an arbitrary 0-100 target to the nearest step the hub supports.
+
+    The hub's percent-open command only accepts multiples of
+    `PERCENT_OPEN_STEP` within `[PERCENT_OPEN_MIN, PERCENT_OPEN_MAX]` - a
+    coarser 5% granularity than the slider itself, which reports/accepts any
+    integer 0-100. Full 0/100 targets are handled separately by the caller
+    (a full close/open, not a percent-open command at all).
+    """
+    rounded = round(target / PERCENT_OPEN_STEP) * PERCENT_OPEN_STEP
+    return max(PERCENT_OPEN_MIN, min(PERCENT_OPEN_MAX, rounded))
 
 
 async def async_setup_entry(
@@ -39,7 +58,10 @@ class BndGarageCover(BndGarageEntity, CoverEntity):
 
     _attr_device_class = CoverDeviceClass.GARAGE
     _attr_supported_features = (
-        CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
+        CoverEntityFeature.OPEN
+        | CoverEntityFeature.CLOSE
+        | CoverEntityFeature.STOP
+        | CoverEntityFeature.SET_POSITION
     )
     _attr_name = None
 
@@ -91,6 +113,25 @@ class BndGarageCover(BndGarageEntity, CoverEntity):
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the garage door."""
         await self._async_send_command(self.coordinator.client.stop_door)
+
+    @override
+    async def async_set_cover_position(self, **kwargs: Any) -> None:
+        """Move the door to a specific position.
+
+        0 and 100 map to a full close/open rather than a percent-open
+        command - the hub's percent-open range is 5-95 only. Anything else
+        is rounded to the nearest 5% step the hub actually supports.
+        """
+        target: int = kwargs[ATTR_POSITION]
+        if target == 0:
+            await self._async_send_command(self.coordinator.client.close_door)
+        elif target == 100:
+            await self._async_send_command(self.coordinator.client.open_door)
+        else:
+            rounded = _round_to_percent_step(target)
+            await self._async_send_command(
+                lambda: self.coordinator.client.set_open_percent(rounded)
+            )
 
     async def _async_send_command(self, command: Callable[[], Awaitable[None]]) -> None:
         try:
