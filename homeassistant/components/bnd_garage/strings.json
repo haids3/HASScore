@@ -8,7 +8,6 @@
     "error": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
       "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
-      "multiple_devices_found": "Found more than one device on this hub. This is not yet supported.",
       "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "step": {

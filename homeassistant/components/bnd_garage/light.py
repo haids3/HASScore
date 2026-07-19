@@ -24,9 +24,12 @@ async def async_setup_entry(
     entry: BndGarageConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the B&D Garage hub light, if the hub reports one."""
-    if entry.runtime_data.data.light is not None:
-        async_add_entities([BndGarageLight(entry.runtime_data)])
+    """Set up a light for each device that reports one."""
+    async_add_entities(
+        BndGarageLight(coordinator)
+        for coordinator in entry.runtime_data
+        if coordinator.data.light is not None
+    )
 
 
 class BndGarageLight(BndGarageEntity, LightEntity):
@@ -58,7 +61,7 @@ class BndGarageLight(BndGarageEntity, LightEntity):
         if light is None or light.is_on == want_on:
             return
         try:
-            await self.coordinator.client.send_command(light.command)
+            await self.coordinator.send_command(light.command)
         except (HubCommandError, AuthenticationError, HubUnreachableError) as err:
             raise HomeAssistantError(str(err)) from err
         await self.coordinator.async_request_refresh()

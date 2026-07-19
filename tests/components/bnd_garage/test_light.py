@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 from . import setup_integration
+from .conftest import TEST_DEVICE_ID
 
 from tests.common import MockConfigEntry
 
@@ -78,7 +79,7 @@ async def test_turn_on_sends_cmd_only_when_currently_off(
         "light", "turn_on", {ATTR_ENTITY_ID: ENTITY_ID}, blocking=True
     )
 
-    mock_client.send_command.assert_awaited_once_with(16)
+    mock_client.send_command.assert_awaited_once_with(TEST_DEVICE_ID, 16)
 
 
 async def test_turn_on_is_noop_when_already_on(
@@ -120,7 +121,7 @@ async def test_turn_off_sends_cmd_only_when_currently_on(
         "light", "turn_off", {ATTR_ENTITY_ID: ENTITY_ID}, blocking=True
     )
 
-    mock_client.send_command.assert_awaited_once_with(17)
+    mock_client.send_command.assert_awaited_once_with(TEST_DEVICE_ID, 17)
 
 
 async def test_turn_on_error_surfaces_as_home_assistant_error(

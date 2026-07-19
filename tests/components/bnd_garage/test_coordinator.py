@@ -13,6 +13,7 @@ from homeassistant.components.bnd_garage.coordinator import (
 from homeassistant.core import HomeAssistant
 
 from . import setup_integration
+from .conftest import TEST_DEVICE_ID
 
 from tests.common import MockConfigEntry
 
@@ -39,7 +40,7 @@ async def test_poll_interval_tracks_door_state(
     )
     await setup_integration(hass, mock_config_entry, [])
 
-    assert mock_config_entry.runtime_data.update_interval == expected_interval
+    assert mock_config_entry.runtime_data[0].update_interval == expected_interval
 
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
@@ -55,7 +56,7 @@ async def test_poll_interval_reverts_after_movement_stops(
         state=DoorState.MOVING, position=50, rate=5
     )
     await setup_integration(hass, mock_config_entry, [])
-    coordinator = mock_config_entry.runtime_data
+    coordinator = mock_config_entry.runtime_data[0]
     assert coordinator.update_interval == MOVING_UPDATE_INTERVAL
 
     mock_client.get_status.return_value = HubStatus(
@@ -83,7 +84,7 @@ async def test_moving_position_is_estimated_from_elapsed_time(
         return_value=100.0,
     ):
         await setup_integration(hass, mock_config_entry, [])
-    coordinator = mock_config_entry.runtime_data
+    coordinator = mock_config_entry.runtime_data[0]
 
     mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=0, rate=10
@@ -120,7 +121,7 @@ async def test_moving_position_picks_up_rate_drift_mid_travel(
         return_value=300.0,
     ):
         await setup_integration(hass, mock_config_entry, [])
-    coordinator = mock_config_entry.runtime_data
+    coordinator = mock_config_entry.runtime_data[0]
 
     mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=0, rate=10
@@ -174,7 +175,7 @@ async def test_moving_position_reanchors_on_direction_reversal(
         return_value=200.0,
     ):
         await setup_integration(hass, mock_config_entry, [])
-    coordinator = mock_config_entry.runtime_data
+    coordinator = mock_config_entry.runtime_data[0]
 
     mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=0, rate=10
@@ -229,7 +230,7 @@ async def test_moving_position_trusts_hub_when_it_advances_live(
         return_value=700.0,
     ):
         await setup_integration(hass, mock_config_entry, [])
-    coordinator = mock_config_entry.runtime_data
+    coordinator = mock_config_entry.runtime_data[0]
 
     # First poll of a new move: no prior raw position to compare against yet,
     # so the flat-rate estimate is used (clamped to 1).
@@ -273,7 +274,7 @@ async def test_moving_position_uses_calibrated_curve(
         return_value=400.0,
     ):
         await setup_integration(hass, mock_config_entry, [])
-    coordinator = mock_config_entry.runtime_data
+    coordinator = mock_config_entry.runtime_data[0]
     coordinator.open_curve = CalibrationCurve(points=((0, 0), (5, 40), (10, 100)))
 
     mock_client.get_status.return_value = HubStatus(
@@ -311,7 +312,7 @@ async def test_moving_position_ignores_curve_when_not_starting_at_reference(
         return_value=500.0,
     ):
         await setup_integration(hass, mock_config_entry, [])
-    coordinator = mock_config_entry.runtime_data
+    coordinator = mock_config_entry.runtime_data[0]
     coordinator.open_curve = CalibrationCurve(points=((0, 0), (5, 40), (10, 100)))
 
     mock_client.get_status.return_value = HubStatus(
@@ -348,7 +349,7 @@ async def test_auto_calibrates_from_full_open_movement(
         return_value=1000.0,
     ):
         await setup_integration(hass, mock_config_entry, [])
-    coordinator = mock_config_entry.runtime_data
+    coordinator = mock_config_entry.runtime_data[0]
     assert coordinator.open_curve is None
 
     mock_client.get_status.return_value = HubStatus(
@@ -372,7 +373,10 @@ async def test_auto_calibrates_from_full_open_movement(
     assert coordinator.open_curve is not None
     assert coordinator.open_curve.points[0] == (0.0, 0)
     assert coordinator.open_curve.points[-1] == (16.0, 100)
-    assert mock_config_entry.options["open_curve"] == coordinator.open_curve.to_json()
+    assert (
+        mock_config_entry.options["devices"][TEST_DEVICE_ID]["open_curve"]
+        == coordinator.open_curve.to_json()
+    )
 
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
@@ -392,7 +396,7 @@ async def test_auto_calibrates_from_full_close_movement(
         return_value=2000.0,
     ):
         await setup_integration(hass, mock_config_entry, [])
-    coordinator = mock_config_entry.runtime_data
+    coordinator = mock_config_entry.runtime_data[0]
 
     mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=100, rate=-10
@@ -415,7 +419,10 @@ async def test_auto_calibrates_from_full_close_movement(
     assert coordinator.close_curve is not None
     assert coordinator.close_curve.points[0] == (0.0, 100)
     assert coordinator.close_curve.points[-1] == (20.0, 0)
-    assert mock_config_entry.options["close_curve"] == coordinator.close_curve.to_json()
+    assert (
+        mock_config_entry.options["devices"][TEST_DEVICE_ID]["close_curve"]
+        == coordinator.close_curve.to_json()
+    )
 
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
@@ -439,7 +446,7 @@ async def test_auto_calibrate_skips_movement_not_starting_at_extreme(
         return_value=3000.0,
     ):
         await setup_integration(hass, mock_config_entry, [])
-    coordinator = mock_config_entry.runtime_data
+    coordinator = mock_config_entry.runtime_data[0]
 
     mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=30, rate=10
@@ -460,7 +467,9 @@ async def test_auto_calibrate_skips_movement_not_starting_at_extreme(
         await coordinator.async_refresh()
 
     assert coordinator.open_curve is None
-    assert "open_curve" not in mock_config_entry.options
+    assert "open_curve" not in mock_config_entry.options.get("devices", {}).get(
+        TEST_DEVICE_ID, {}
+    )
 
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
@@ -484,7 +493,7 @@ async def test_auto_calibrate_skips_movement_stopped_short_of_extreme(
         return_value=4000.0,
     ):
         await setup_integration(hass, mock_config_entry, [])
-    coordinator = mock_config_entry.runtime_data
+    coordinator = mock_config_entry.runtime_data[0]
 
     mock_client.get_status.return_value = HubStatus(
         state=DoorState.MOVING, position=0, rate=10
@@ -505,7 +514,9 @@ async def test_auto_calibrate_skips_movement_stopped_short_of_extreme(
         await coordinator.async_refresh()
 
     assert coordinator.open_curve is None
-    assert "open_curve" not in mock_config_entry.options
+    assert "open_curve" not in mock_config_entry.options.get("devices", {}).get(
+        TEST_DEVICE_ID, {}
+    )
 
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()

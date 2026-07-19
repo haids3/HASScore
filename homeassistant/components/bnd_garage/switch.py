@@ -25,15 +25,15 @@ async def async_setup_entry(
     entry: BndGarageConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the B&D Garage lockout/auxiliary switches, for whichever the hub reports."""
-    coordinator = entry.runtime_data
+    """Set up lockout/auxiliary switches for each device, for whichever it reports."""
     entities: list[SwitchEntity] = []
-    if coordinator.data.remote_control_lockout is not None:
-        entities.append(BndGarageRemoteControlLockoutSwitch(coordinator))
-    if coordinator.data.phone_lockout is not None:
-        entities.append(BndGaragePhoneLockoutSwitch(coordinator))
-    if coordinator.data.auxiliary is not None:
-        entities.append(BndGarageAuxiliarySwitch(coordinator))
+    for coordinator in entry.runtime_data:
+        if coordinator.data.remote_control_lockout is not None:
+            entities.append(BndGarageRemoteControlLockoutSwitch(coordinator))
+        if coordinator.data.phone_lockout is not None:
+            entities.append(BndGaragePhoneLockoutSwitch(coordinator))
+        if coordinator.data.auxiliary is not None:
+            entities.append(BndGarageAuxiliarySwitch(coordinator))
     async_add_entities(entities)
 
 
@@ -73,7 +73,7 @@ class BndGarageRemoteControlLockoutSwitch(BndGarageEntity, SwitchEntity):
         if lockout is None or lockout.is_on == enabled:
             return
         try:
-            await self.coordinator.client.set_remote_control_lockout(enabled)
+            await self.coordinator.set_remote_control_lockout(enabled)
         except (HubCommandError, AuthenticationError, HubUnreachableError) as err:
             raise HomeAssistantError(str(err)) from err
         await self.coordinator.async_request_refresh()
@@ -118,7 +118,7 @@ class BndGaragePhoneLockoutSwitch(BndGarageEntity, SwitchEntity):
         if lockout is None or lockout.is_on == enabled:
             return
         try:
-            await self.coordinator.client.set_phone_lockout(enabled)
+            await self.coordinator.set_phone_lockout(enabled)
         except (HubCommandError, AuthenticationError, HubUnreachableError) as err:
             raise HomeAssistantError(str(err)) from err
         await self.coordinator.async_request_refresh()
@@ -164,7 +164,7 @@ class BndGarageAuxiliarySwitch(BndGarageEntity, SwitchEntity):
         if auxiliary is None or auxiliary.is_on == want_on:
             return
         try:
-            await self.coordinator.client.send_command(auxiliary.command)
+            await self.coordinator.send_command(auxiliary.command)
         except (HubCommandError, AuthenticationError, HubUnreachableError) as err:
             raise HomeAssistantError(str(err)) from err
         await self.coordinator.async_request_refresh()

@@ -17,9 +17,10 @@ class BndGarageEntity(CoordinatorEntity[BndGarageDataUpdateCoordinator]):
         super().__init__(coordinator)
         hub_id = coordinator.config_entry.unique_id
         assert hub_id is not None
-        self._attr_unique_id = hub_id
+        device_key = f"{hub_id}_{coordinator.device_id}"
+        self._attr_unique_id = device_key
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, hub_id)},
-            name="B&D Garage",
+            identifiers={(DOMAIN, device_key)},
+            name=coordinator.data.name or "B&D Garage",
             manufacturer="B&D",
         )

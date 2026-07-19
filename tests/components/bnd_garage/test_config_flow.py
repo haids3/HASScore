@@ -2,16 +2,12 @@
 
 from unittest.mock import AsyncMock
 
-from bnd_garage_client.errors import (
-    AmbiguousDeviceError,
-    AuthenticationError,
-    HubUnreachableError,
-)
+from bnd_garage_client.errors import AuthenticationError, HubUnreachableError
 import pytest
 
 from homeassistant.components.bnd_garage.const import (
-    CONF_ACTION_DEVICE_ID,
     CONF_ACTIVATION_CODE,
+    CONF_DEVICE_IDS,
     CONF_HUB_ID,
     CONF_USER_PASSWORD,
     DOMAIN,
@@ -52,7 +48,7 @@ async def test_form(
     assert result["title"] == "B&D Garage"
     assert result["data"][CONF_HOST] == TEST_HOST
     assert result["data"][CONF_HUB_ID] == TEST_CREDENTIALS.hub_id
-    assert result["data"][CONF_ACTION_DEVICE_ID] == TEST_CREDENTIALS.device_id
+    assert result["data"][CONF_DEVICE_IDS] == list(TEST_CREDENTIALS.devices)
     assert result["result"].unique_id == TEST_CREDENTIALS.hub_id
     assert len(mock_setup_entry.mock_calls) == 1
 
@@ -62,11 +58,6 @@ async def test_form(
     [
         pytest.param(AuthenticationError, "invalid_auth", id="invalid_auth"),
         pytest.param(HubUnreachableError, "cannot_connect", id="cannot_connect"),
-        pytest.param(
-            AmbiguousDeviceError([("door 1", "id1"), ("door 2", "id2")]),
-            "multiple_devices_found",
-            id="multiple_devices_found",
-        ),
         pytest.param(Exception, "unknown", id="unknown"),
     ],
 )

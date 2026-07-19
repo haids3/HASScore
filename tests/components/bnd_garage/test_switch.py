@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 from . import setup_integration
+from .conftest import TEST_DEVICE_ID
 
 from tests.common import MockConfigEntry
 
@@ -82,7 +83,9 @@ async def test_remote_control_lockout_turn_on_calls_client(
         "switch", "turn_on", {ATTR_ENTITY_ID: REMOTE_LOCKOUT_ENTITY_ID}, blocking=True
     )
 
-    mock_client.set_remote_control_lockout.assert_awaited_once_with(True)
+    mock_client.set_remote_control_lockout.assert_awaited_once_with(
+        TEST_DEVICE_ID, True
+    )
 
 
 async def test_remote_control_lockout_turn_on_is_noop_when_already_locked(
@@ -124,7 +127,9 @@ async def test_remote_control_lockout_turn_off_calls_client(
         "switch", "turn_off", {ATTR_ENTITY_ID: REMOTE_LOCKOUT_ENTITY_ID}, blocking=True
     )
 
-    mock_client.set_remote_control_lockout.assert_awaited_once_with(False)
+    mock_client.set_remote_control_lockout.assert_awaited_once_with(
+        TEST_DEVICE_ID, False
+    )
 
 
 @pytest.mark.parametrize(
@@ -173,7 +178,7 @@ async def test_phone_lockout_turn_on_calls_client(
         "switch", "turn_on", {ATTR_ENTITY_ID: PHONE_LOCKOUT_ENTITY_ID}, blocking=True
     )
 
-    mock_client.set_phone_lockout.assert_awaited_once_with(True)
+    mock_client.set_phone_lockout.assert_awaited_once_with(TEST_DEVICE_ID, True)
 
 
 async def test_phone_lockout_turn_off_calls_client(
@@ -194,7 +199,7 @@ async def test_phone_lockout_turn_off_calls_client(
         "switch", "turn_off", {ATTR_ENTITY_ID: PHONE_LOCKOUT_ENTITY_ID}, blocking=True
     )
 
-    mock_client.set_phone_lockout.assert_awaited_once_with(False)
+    mock_client.set_phone_lockout.assert_awaited_once_with(TEST_DEVICE_ID, False)
 
 
 async def test_phone_lockout_error_surfaces_as_home_assistant_error(
@@ -267,7 +272,7 @@ async def test_auxiliary_turn_on_sends_cmd_only_when_currently_off(
         "switch", "turn_on", {ATTR_ENTITY_ID: AUXILIARY_ENTITY_ID}, blocking=True
     )
 
-    mock_client.send_command.assert_awaited_once_with(18)
+    mock_client.send_command.assert_awaited_once_with(TEST_DEVICE_ID, 18)
 
 
 async def test_auxiliary_turn_on_is_noop_when_already_on(
@@ -309,4 +314,4 @@ async def test_auxiliary_turn_off_sends_cmd_only_when_currently_on(
         "switch", "turn_off", {ATTR_ENTITY_ID: AUXILIARY_ENTITY_ID}, blocking=True
     )
 
-    mock_client.send_command.assert_awaited_once_with(19)
+    mock_client.send_command.assert_awaited_once_with(TEST_DEVICE_ID, 19)

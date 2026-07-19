@@ -24,10 +24,10 @@ async def async_setup_entry(
     entry: BndGarageConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up a button for each position preset the hub currently reports."""
-    coordinator = entry.runtime_data
+    """Set up a button for each position preset each device currently reports."""
     async_add_entities(
         BndGaragePresetButton(coordinator, index, preset.command)
+        for coordinator in entry.runtime_data
         for index, preset in enumerate(coordinator.data.presets)
     )
 

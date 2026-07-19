@@ -49,8 +49,10 @@ async def async_setup_entry(
     entry: BndGarageConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the B&D Garage cover."""
-    async_add_entities([BndGarageCover(entry.runtime_data)])
+    """Set up a cover for each device the hub reports."""
+    async_add_entities(
+        BndGarageCover(coordinator) for coordinator in entry.runtime_data
+    )
 
 
 class BndGarageCover(BndGarageEntity, CoverEntity):
@@ -102,17 +104,17 @@ class BndGarageCover(BndGarageEntity, CoverEntity):
     @override
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the garage door."""
-        await self._async_send_command(self.coordinator.client.open_door)
+        await self._async_send_command(self.coordinator.open_door)
 
     @override
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the garage door."""
-        await self._async_send_command(self.coordinator.client.close_door)
+        await self._async_send_command(self.coordinator.close_door)
 
     @override
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the garage door."""
-        await self._async_send_command(self.coordinator.client.stop_door)
+        await self._async_send_command(self.coordinator.stop_door)
 
     @override
     async def async_set_cover_position(self, **kwargs: Any) -> None:
@@ -124,13 +126,13 @@ class BndGarageCover(BndGarageEntity, CoverEntity):
         """
         target: int = kwargs[ATTR_POSITION]
         if target == 0:
-            await self._async_send_command(self.coordinator.client.close_door)
+            await self._async_send_command(self.coordinator.close_door)
         elif target == 100:
-            await self._async_send_command(self.coordinator.client.open_door)
+            await self._async_send_command(self.coordinator.open_door)
         else:
             rounded = _round_to_percent_step(target)
             await self._async_send_command(
-                lambda: self.coordinator.client.set_open_percent(rounded)
+                lambda: self.coordinator.set_open_percent(rounded)
             )
 
     async def _async_send_command(self, command: Callable[[], Awaitable[None]]) -> None:

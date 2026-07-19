@@ -8,4 +8,6 @@ CONF_HUB_ID = "hub_id"
 CONF_PHONE_ID = "phone_id"
 CONF_PHONE_PASSWORD = "phone_password"
 CONF_PHONE_SECRET = "phone_secret"
-CONF_ACTION_DEVICE_ID = "action_device_id"
+CONF_DEVICE_IDS = "device_ids"
+"""Every device ID this phone has access to under the paired hub - a hub with
+multiple door openers grants control over all of them from one pairing."""

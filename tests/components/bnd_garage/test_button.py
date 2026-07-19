@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 from . import setup_integration
+from .conftest import TEST_DEVICE_ID
 
 from tests.common import MockConfigEntry
 
@@ -76,7 +77,7 @@ async def test_button_press_activates_preset(
         "button", "press", {ATTR_ENTITY_ID: PET_ENTITY_ID}, blocking=True
     )
 
-    mock_client.send_command.assert_awaited_once_with(5)
+    mock_client.send_command.assert_awaited_once_with(TEST_DEVICE_ID, 5)
 
 
 async def test_button_press_error_surfaces_as_home_assistant_error(
@@ -119,7 +120,7 @@ async def test_button_name_updates_when_hub_title_changes(
         presets=(PresetAction(command=5, label="Pet"),),
     )
     await setup_integration(hass, mock_config_entry, [Platform.BUTTON])
-    coordinator = mock_config_entry.runtime_data
+    coordinator = mock_config_entry.runtime_data[0]
 
     mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED,
@@ -147,7 +148,7 @@ async def test_button_becomes_unavailable_if_preset_removed(
         presets=(PresetAction(command=5, label="Pet"),),
     )
     await setup_integration(hass, mock_config_entry, [Platform.BUTTON])
-    coordinator = mock_config_entry.runtime_data
+    coordinator = mock_config_entry.runtime_data[0]
 
     mock_client.get_status.return_value = HubStatus(
         state=DoorState.CLOSED, position=0, rate=0, presets=()
@@ -191,9 +192,11 @@ async def test_last_position_recorded_after_preset_settles(
         rate=0,
         presets=(PresetAction(command=5, label="Pet"),),
     )
-    await mock_config_entry.runtime_data.async_refresh()
+    await mock_config_entry.runtime_data[0].async_refresh()
 
     state = hass.states.get(PET_ENTITY_ID)
     assert state is not None
     assert state.attributes["last_position"] == 16
-    assert mock_config_entry.options[CONF_PRESET_POSITIONS] == {"5": 16}
+    assert mock_config_entry.options["devices"][TEST_DEVICE_ID][
+        CONF_PRESET_POSITIONS
+    ] == {"5": 16}

@@ -10,6 +10,7 @@ from bnd_garage_client import DoorState, HubClient, HubStatus
 from bnd_garage_client.errors import AuthenticationError, HubUnreachableError
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_DEVICES
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -26,26 +27,35 @@ CONF_OPEN_CURVE = "open_curve"
 CONF_CLOSE_CURVE = "close_curve"
 CONF_PRESET_POSITIONS = "preset_positions"
 
-type BndGarageConfigEntry = ConfigEntry[BndGarageDataUpdateCoordinator]
+type BndGarageConfigEntry = ConfigEntry[list[BndGarageDataUpdateCoordinator]]
 
 
 class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
-    """Coordinator that polls the hub for the current door status."""
+    """Coordinator that polls the hub for one device's current door status.
+
+    A hub with multiple door openers gets one of these per device, all
+    sharing the same `HubClient`/config entry - see `__init__.py`.
+    """
 
     config_entry: BndGarageConfigEntry
 
     def __init__(
-        self, hass: HomeAssistant, config_entry: BndGarageConfigEntry, client: HubClient
+        self,
+        hass: HomeAssistant,
+        config_entry: BndGarageConfigEntry,
+        client: HubClient,
+        device_id: str,
     ) -> None:
-        """Initialize the coordinator."""
+        """Initialize the coordinator for one device on the hub."""
         super().__init__(
             hass,
             _LOGGER,
             config_entry=config_entry,
-            name=DOMAIN,
+            name=f"{DOMAIN}_{device_id}",
             update_interval=UPDATE_INTERVAL,
         )
         self.client = client
+        self.device_id = device_id
         self._estimated_position: float = 0
         self._last_estimate_at: float | None = None
         self._last_rate = 0.0
@@ -54,24 +64,63 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
         self._segment_is_opening: bool | None = None
         self._segment_start_position: float = 0
         self._pending_preset_cmd: int | None = None
+        device_options = config_entry.options.get(CONF_DEVICES, {}).get(device_id, {})
         self.open_curve = CalibrationCurve.from_json(
-            config_entry.options.get(CONF_OPEN_CURVE)
+            device_options.get(CONF_OPEN_CURVE)
         )
         self.close_curve = CalibrationCurve.from_json(
-            config_entry.options.get(CONF_CLOSE_CURVE)
+            device_options.get(CONF_CLOSE_CURVE)
         )
         self._preset_positions: dict[int, int] = {
             int(cmd): position
-            for cmd, position in config_entry.options.get(
-                CONF_PRESET_POSITIONS, {}
-            ).items()
+            for cmd, position in device_options.get(CONF_PRESET_POSITIONS, {}).items()
         }
+
+    async def open_door(self) -> None:
+        """Open this device's garage door."""
+        await self.client.open_door(self.device_id)
+
+    async def close_door(self) -> None:
+        """Close this device's garage door."""
+        await self.client.close_door(self.device_id)
+
+    async def stop_door(self) -> None:
+        """Stop this device's garage door mid-travel."""
+        await self.client.stop_door(self.device_id)
+
+    async def set_open_percent(self, percent: int) -> None:
+        """Move this device's door to an exact percent-open position."""
+        await self.client.set_open_percent(self.device_id, percent)
+
+    async def set_remote_control_lockout(self, enabled: bool) -> None:
+        """Enable/disable this device's physical remote/wall-button lockout."""
+        await self.client.set_remote_control_lockout(self.device_id, enabled)
+
+    async def set_phone_lockout(self, enabled: bool) -> None:
+        """Enable/disable this device's app-protocol control lockout."""
+        await self.client.set_phone_lockout(self.device_id, enabled)
+
+    async def send_command(self, command: int) -> None:
+        """Send a raw command code to this device (light toggle, aux relay)."""
+        await self.client.send_command(self.device_id, command)
+
+    def _update_device_options(self, **updates: object) -> None:
+        """Merge `updates` into this device's slice of the config entry options."""
+        devices = {
+            key: dict(value)
+            for key, value in self.config_entry.options.get(CONF_DEVICES, {}).items()
+        }
+        devices[self.device_id] = {**devices.get(self.device_id, {}), **updates}
+        self.hass.config_entries.async_update_entry(
+            self.config_entry,
+            options={**self.config_entry.options, CONF_DEVICES: devices},
+        )
 
     @override
     async def _async_update_data(self) -> HubStatus:
-        """Fetch the current door status from the hub."""
+        """Fetch this device's current status from the hub."""
         try:
-            status = await self.client.get_status()
+            status = await self.client.get_status(self.device_id)
         except AuthenticationError as err:
             raise ConfigEntryAuthFailed from err
         except HubUnreachableError as err:
@@ -173,15 +222,9 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
         else:
             self.close_curve = curve
 
-        self.hass.config_entries.async_update_entry(
-            self.config_entry,
-            options={
-                **self.config_entry.options,
-                CONF_OPEN_CURVE: self.open_curve.to_json() if self.open_curve else None,
-                CONF_CLOSE_CURVE: self.close_curve.to_json()
-                if self.close_curve
-                else None,
-            },
+        self._update_device_options(
+            open_curve=self.open_curve.to_json() if self.open_curve else None,
+            close_curve=self.close_curve.to_json() if self.close_curve else None,
         )
 
     def _maybe_record_preset_position(self, end_position: int) -> None:
@@ -197,15 +240,10 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
             return
         self._preset_positions[self._pending_preset_cmd] = end_position
         self._pending_preset_cmd = None
-        self.hass.config_entries.async_update_entry(
-            self.config_entry,
-            options={
-                **self.config_entry.options,
-                CONF_PRESET_POSITIONS: {
-                    str(cmd): position
-                    for cmd, position in self._preset_positions.items()
-                },
-            },
+        self._update_device_options(
+            preset_positions={
+                str(cmd): position for cmd, position in self._preset_positions.items()
+            }
         )
 
     def preset_position(self, cmd: int) -> int | None:
@@ -221,6 +259,6 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
         pre-move position as the preset's target instead of waiting for it
         to settle.
         """
-        await self.client.send_command(cmd)
+        await self.send_command(cmd)
         self._pending_preset_cmd = cmd
         await self.async_request_refresh()

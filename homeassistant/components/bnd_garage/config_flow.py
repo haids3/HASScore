@@ -5,11 +5,7 @@ import logging
 from typing import Any, override
 
 from bnd_garage_client import Credentials, pair_new_phone
-from bnd_garage_client.errors import (
-    AmbiguousDeviceError,
-    AuthenticationError,
-    HubUnreachableError,
-)
+from bnd_garage_client.errors import AuthenticationError, HubUnreachableError
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
@@ -17,8 +13,8 @@ from homeassistant.const import CONF_HOST
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
-    CONF_ACTION_DEVICE_ID,
     CONF_ACTIVATION_CODE,
+    CONF_DEVICE_IDS,
     CONF_HUB_ID,
     CONF_PHONE_ID,
     CONF_PHONE_PASSWORD,
@@ -45,7 +41,9 @@ STEP_REAUTH_DATA_SCHEMA = vol.Schema(
 )
 
 
-def _credentials_to_entry_data(host: str, credentials: Credentials) -> dict[str, str]:
+def _credentials_to_entry_data(
+    host: str, credentials: Credentials
+) -> dict[str, str | list[str]]:
     return {
         CONF_HOST: host,
         CONF_HUB_ID: credentials.hub_id,
@@ -53,14 +51,14 @@ def _credentials_to_entry_data(host: str, credentials: Credentials) -> dict[str,
         CONF_PHONE_PASSWORD: credentials.phone_password,
         CONF_PHONE_SECRET: credentials.control_secret,
         CONF_USER_PASSWORD: credentials.user_password,
-        CONF_ACTION_DEVICE_ID: credentials.device_id,
+        CONF_DEVICE_IDS: list(credentials.devices),
     }
 
 
 class BndGarageConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for B&D Garage."""
 
-    VERSION = 1
+    VERSION = 2
 
     @override
     async def async_step_user(
@@ -80,8 +78,6 @@ class BndGarageConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except HubUnreachableError:
                 errors["base"] = "cannot_connect"
-            except AmbiguousDeviceError:
-                errors["base"] = "multiple_devices_found"
             except Exception:
                 _LOGGER.exception("Unexpected exception during pairing")
                 errors["base"] = "unknown"
@@ -122,8 +118,6 @@ class BndGarageConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except HubUnreachableError:
                 errors["base"] = "cannot_connect"
-            except AmbiguousDeviceError:
-                errors["base"] = "multiple_devices_found"
             except Exception:
                 _LOGGER.exception("Unexpected exception during re-pairing")
                 errors["base"] = "unknown"

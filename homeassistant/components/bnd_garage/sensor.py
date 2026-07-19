@@ -18,9 +18,12 @@ async def async_setup_entry(
     entry: BndGarageConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the B&D Garage activity sensor, if the hub reports one."""
-    if entry.runtime_data.data.activity is not None:
-        async_add_entities([BndGarageActivitySensor(entry.runtime_data)])
+    """Set up an activity sensor for each device that reports one."""
+    async_add_entities(
+        BndGarageActivitySensor(coordinator)
+        for coordinator in entry.runtime_data
+        if coordinator.data.activity is not None
+    )
 
 
 class BndGarageActivitySensor(BndGarageEntity, SensorEntity):

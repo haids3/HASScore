@@ -79,7 +79,7 @@ async def test_sensor_updates_on_new_activity(
             alert=0,
         ),
     )
-    await mock_config_entry.runtime_data.async_refresh()
+    await mock_config_entry.runtime_data[0].async_refresh()
 
     state = hass.states.get(ENTITY_ID)
     assert state is not None

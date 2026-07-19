@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
 from . import setup_integration
+from .conftest import TEST_DEVICE_ID
 
 from tests.common import MockConfigEntry
 
@@ -77,7 +78,7 @@ async def test_position_and_closed_state(
 ) -> None:
     """Test the reported position and closed state track the hub status."""
     mock_client.get_status.return_value = status
-    await mock_config_entry.runtime_data.async_refresh()
+    await mock_config_entry.runtime_data[0].async_refresh()
     await hass.async_block_till_done()
 
     state = hass.states.get(ENTITY_ID)
@@ -95,7 +96,7 @@ async def test_unknown_position_is_not_reported(
     mock_client.get_status.return_value = HubStatus(
         state=DoorState.UNKNOWN, position=-1, rate=0
     )
-    await mock_config_entry.runtime_data.async_refresh()
+    await mock_config_entry.runtime_data[0].async_refresh()
     await hass.async_block_till_done()
 
     state = hass.states.get(ENTITY_ID)
@@ -125,7 +126,7 @@ async def test_moving_state(
         position=50,
         rate=rate,
     )
-    await mock_config_entry.runtime_data.async_refresh()
+    await mock_config_entry.runtime_data[0].async_refresh()
     await hass.async_block_till_done()
 
     state = hass.states.get(ENTITY_ID)
@@ -231,4 +232,6 @@ async def test_set_position_rounds_to_nearest_step(
         {ATTR_ENTITY_ID: ENTITY_ID, ATTR_POSITION: target},
         blocking=True,
     )
-    mock_client.set_open_percent.assert_awaited_once_with(expected_percent)
+    mock_client.set_open_percent.assert_awaited_once_with(
+        TEST_DEVICE_ID, expected_percent
+    )
