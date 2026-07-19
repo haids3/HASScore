@@ -6,7 +6,10 @@ from bnd_garage_client.errors import AuthenticationError, HubUnreachableError
 from bnd_garage_client.models import DoorState, HubInfo, HubStatus
 import pytest
 
-from homeassistant.components.bnd_garage import _DEVICE_DISCOVERY_INTERVAL
+from homeassistant.components.bnd_garage import (
+    _DEVICE_DISCOVERY_INTERVAL,
+    async_remove_config_entry_device,
+)
 from homeassistant.components.bnd_garage.const import (
     CONF_DEVICE_IDS,
     CONF_HUB_ID,
@@ -335,3 +338,47 @@ async def test_periodic_check_ignores_hub_unreachable(
 
         assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
         await hass.async_block_till_done()
+
+
+async def test_remove_config_entry_device_allows_orphaned_device(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test a device with no matching device_id can be removed."""
+    await setup_integration(hass, mock_config_entry, [])
+    device_registry = dr.async_get(hass)
+    orphaned_device = device_registry.async_get_or_create(
+        config_entry_id=mock_config_entry.entry_id,
+        identifiers={(DOMAIN, f"{TEST_HUB_ID}_stale-device")},
+        name="Old Door",
+    )
+
+    assert await async_remove_config_entry_device(
+        hass, mock_config_entry, orphaned_device
+    )
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_remove_config_entry_device_refuses_active_device(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test a device matching a currently-known device_id can't be removed."""
+    await setup_integration(hass, mock_config_entry, [])
+    device_registry = dr.async_get(hass)
+    active_device = device_registry.async_get_or_create(
+        config_entry_id=mock_config_entry.entry_id,
+        identifiers={(DOMAIN, f"{TEST_HUB_ID}_{TEST_DEVICE_ID}")},
+        name="B&D Garage",
+    )
+
+    assert not await async_remove_config_entry_device(
+        hass, mock_config_entry, active_device
+    )
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()

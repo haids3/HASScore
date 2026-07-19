@@ -129,6 +129,26 @@ async def async_unload_entry(hass: HomeAssistant, entry: BndGarageConfigEntry) -
     return unload_ok
 
 
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: BndGarageConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Allow removing a device the hub no longer reports.
+
+    Home Assistant refuses to let a device tied to a live config entry be
+    deleted from the UI unless the integration explicitly permits it here.
+    Only orphaned devices - e.g. left behind by the pre-multi-device
+    migration, or a door genuinely removed from the hub - are approved; a
+    device matching a currently-known device ID is refused, so an active
+    door can't be deleted out from under a live config entry.
+    """
+    hub_id = entry.unique_id
+    known_keys = {f"{hub_id}_{device_id}" for device_id in entry.data[CONF_DEVICE_IDS]}
+    return not any(
+        domain == DOMAIN and key in known_keys
+        for domain, key in device_entry.identifiers
+    )
+
+
 async def async_migrate_entry(hass: HomeAssistant, entry: BndGarageConfigEntry) -> bool:
     """Migrate a pre-multi-device config entry to the device-list schema.
 
