@@ -3,9 +3,10 @@
 from unittest.mock import AsyncMock, patch
 
 from bnd_garage_client.errors import AuthenticationError, HubUnreachableError
-from bnd_garage_client.models import DoorState, HubStatus
+from bnd_garage_client.models import DoorState, HubInfo, HubStatus
 import pytest
 
+from homeassistant.components.bnd_garage import _DEVICE_DISCOVERY_INTERVAL
 from homeassistant.components.bnd_garage.const import (
     CONF_DEVICE_IDS,
     CONF_HUB_ID,
@@ -19,11 +20,12 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+import homeassistant.util.dt as dt_util
 
 from . import setup_integration
 from .conftest import TEST_CREDENTIALS, TEST_DEVICE_ID, TEST_HOST, TEST_HUB_ID
 
-from tests.common import MockConfigEntry
+from tests.common import MockConfigEntry, async_fire_time_changed
 
 
 async def test_setup_and_unload(
@@ -199,3 +201,119 @@ async def test_migrates_single_device_entry_to_device_list(
 
     assert await hass.config_entries.async_unload(old_entry.entry_id)
     await hass.async_block_till_done()
+
+
+def _hub_info(name: str) -> HubInfo:
+    return HubInfo(
+        name=name,
+        ap_name="",
+        serial_number="",
+        version="",
+        firmware="",
+        timezone="",
+        saved_network="",
+        ip_address="",
+        mac_address="",
+        wifi_signal="",
+    )
+
+
+async def test_title_updates_from_hub_info(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test the config entry is renamed to the hub's own configured name."""
+    mock_client.get_hub_info.return_value = _hub_info("Front Garage")
+    await setup_integration(hass, mock_config_entry, [])
+
+    assert mock_config_entry.title == "Front Garage"
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_title_unchanged_when_hub_info_unavailable(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test setup doesn't fail or rename the entry if hub info can't be fetched."""
+    mock_client.get_hub_info.side_effect = HubUnreachableError("boom")
+    await setup_integration(hass, mock_config_entry, [])
+
+    assert mock_config_entry.state is ConfigEntryState.LOADED
+    assert mock_config_entry.title == "B&D Garage"
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_reloads_when_hub_reports_a_new_device(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test a periodic check reloads the entry once a new device appears.
+
+    Keeps the empty-platforms patch active across the reload too - unlike
+    `setup_integration`, whose patch only covers the initial setup - so the
+    reload doesn't try to actually load the real platform modules.
+    """
+    with patch("homeassistant.components.bnd_garage._PLATFORMS", []):
+        mock_config_entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        assert len(mock_config_entry.runtime_data) == 1
+
+        mock_client.get_device_ids.return_value = (TEST_DEVICE_ID, "device-b")
+        async_fire_time_changed(hass, dt_util.utcnow() + _DEVICE_DISCOVERY_INTERVAL)
+        await hass.async_block_till_done()
+
+        assert mock_config_entry.data[CONF_DEVICE_IDS] == [TEST_DEVICE_ID, "device-b"]
+        assert len(mock_config_entry.runtime_data) == 2
+
+        assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def test_no_reload_when_device_list_unchanged(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test the periodic check is a no-op when the hub reports nothing new."""
+    with patch("homeassistant.components.bnd_garage._PLATFORMS", []):
+        mock_config_entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        coordinators_before = mock_config_entry.runtime_data
+
+        async_fire_time_changed(hass, dt_util.utcnow() + _DEVICE_DISCOVERY_INTERVAL)
+        await hass.async_block_till_done()
+
+        assert mock_config_entry.runtime_data is coordinators_before
+
+        assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def test_periodic_check_ignores_hub_unreachable(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test a transient hub error during the periodic check doesn't crash."""
+    with patch("homeassistant.components.bnd_garage._PLATFORMS", []):
+        mock_config_entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+        mock_client.get_device_ids.side_effect = HubUnreachableError("boom")
+
+        async_fire_time_changed(hass, dt_util.utcnow() + _DEVICE_DISCOVERY_INTERVAL)
+        await hass.async_block_till_done()
+
+        assert mock_config_entry.state is ConfigEntryState.LOADED
+
+        assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+        await hass.async_block_till_done()

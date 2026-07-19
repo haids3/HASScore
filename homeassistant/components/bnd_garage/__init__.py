@@ -1,5 +1,7 @@
 """The B&D Garage integration."""
 
+from datetime import datetime, timedelta
+
 from bnd_garage_client import Credentials, HubClient
 from bnd_garage_client.errors import AuthenticationError, HubUnreachableError
 
@@ -7,6 +9,7 @@ from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_track_time_interval
 
 from .const import (
     CONF_DEVICE_IDS,
@@ -29,6 +32,8 @@ _PLATFORMS: list[Platform] = [
     Platform.SENSOR,
     Platform.SWITCH,
 ]
+
+_DEVICE_DISCOVERY_INTERVAL = timedelta(minutes=30)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: BndGarageConfigEntry) -> bool:
@@ -58,6 +63,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: BndGarageConfigEntry) ->
         await client.close()
         raise ConfigEntryNotReady from err
 
+    await _async_update_title_from_hub_info(hass, entry, client)
+
     coordinators = [
         BndGarageDataUpdateCoordinator(hass, entry, client, device_id)
         for device_id in credentials.devices
@@ -69,7 +76,48 @@ async def async_setup_entry(hass: HomeAssistant, entry: BndGarageConfigEntry) ->
 
     await hass.config_entries.async_forward_entry_setups(entry, _PLATFORMS)
 
+    async def _check_for_new_devices(_now: datetime) -> None:
+        """Reload the entry if the hub now reports a device we don't have.
+
+        Devices are only ever added here, never removed - if the hub stops
+        reporting one, its entities simply go unavailable rather than being
+        torn down, matching how a temporarily-unreachable device behaves.
+        """
+        try:
+            current_ids = await client.get_device_ids()
+        except AuthenticationError, HubUnreachableError:
+            return
+        known_ids = set(entry.data[CONF_DEVICE_IDS])
+        if not set(current_ids) - known_ids:
+            return
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_DEVICE_IDS: list(current_ids)}
+        )
+        await hass.config_entries.async_reload(entry.entry_id)
+
+    entry.async_on_unload(
+        async_track_time_interval(
+            hass, _check_for_new_devices, _DEVICE_DISCOVERY_INTERVAL
+        )
+    )
+
     return True
+
+
+async def _async_update_title_from_hub_info(
+    hass: HomeAssistant, entry: BndGarageConfigEntry, client: HubClient
+) -> None:
+    """Rename the config entry to the hub's own configured name, if available.
+
+    Cosmetic only - never blocks setup if the hub doesn't support this call
+    or reports an empty name.
+    """
+    try:
+        hub_info = await client.get_hub_info()
+    except AuthenticationError, HubUnreachableError:
+        return
+    if hub_info is not None and hub_info.name and hub_info.name != entry.title:
+        hass.config_entries.async_update_entry(entry, title=hub_info.name)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: BndGarageConfigEntry) -> bool:

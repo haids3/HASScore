@@ -72,6 +72,8 @@ def mock_client() -> Generator[AsyncMock]:
         client.get_status.return_value = HubStatus(
             state=DoorState.CLOSED, position=0, rate=0
         )
+        client.get_hub_info.return_value = None
+        client.get_device_ids.return_value = TEST_CREDENTIALS.devices
         yield client
 
 
