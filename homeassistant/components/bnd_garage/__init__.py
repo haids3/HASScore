@@ -8,7 +8,7 @@ from bnd_garage_client.errors import AuthenticationError, HubUnreachableError
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.event import async_track_time_interval
 
 from .const import (
@@ -18,6 +18,7 @@ from .const import (
     CONF_PHONE_PASSWORD,
     CONF_PHONE_SECRET,
     CONF_USER_PASSWORD,
+    DOMAIN,
 )
 from .coordinator import BndGarageConfigEntry, BndGarageDataUpdateCoordinator
 
@@ -131,11 +132,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: BndGarageConfigEntry) -
 async def async_migrate_entry(hass: HomeAssistant, entry: BndGarageConfigEntry) -> bool:
     """Migrate a pre-multi-device config entry to the device-list schema.
 
-    Older entries store one device ID under `action_device_id` and every
-    entity's unique_id is a bare hub_id - multi-device support keys entries
-    by `device_ids` and scopes each entity's unique_id to `hub_id_device_id`,
-    so both need rewriting in place for existing installs to keep their
-    entity history/automations instead of getting orphaned duplicates.
+    Older entries store one device ID under `action_device_id`, every
+    entity's unique_id is a bare hub_id, and the HA device entry is
+    identified by a bare hub_id too - multi-device support keys entries by
+    `device_ids` and scopes both the unique_id and the device identifier to
+    `hub_id_device_id`, so all three need rewriting in place for existing
+    installs to keep their entity/device history and automations instead of
+    getting orphaned duplicates.
     """
     if entry.version > 1:
         return True
@@ -150,13 +153,24 @@ async def async_migrate_entry(hass: HomeAssistant, entry: BndGarageConfigEntry) 
 
     hub_id = entry.unique_id
     assert hub_id is not None
-    registry = er.async_get(hass)
-    for entity_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
+    new_device_key = f"{hub_id}_{old_device_id}"
+
+    device_registry = dr.async_get(hass)
+    old_device = device_registry.async_get_device(identifiers={(DOMAIN, hub_id)})
+    if old_device is not None:
+        device_registry.async_update_device(
+            old_device.id, new_identifiers={(DOMAIN, new_device_key)}
+        )
+
+    entity_registry = er.async_get(hass)
+    for entity_entry in er.async_entries_for_config_entry(
+        entity_registry, entry.entry_id
+    ):
         old_unique_id = entity_entry.unique_id
         if not (old_unique_id == hub_id or old_unique_id.startswith(f"{hub_id}_")):
             continue
-        new_unique_id = f"{hub_id}_{old_device_id}" + old_unique_id[len(hub_id) :]
-        registry.async_update_entity(
+        new_unique_id = new_device_key + old_unique_id[len(hub_id) :]
+        entity_registry.async_update_entity(
             entity_entry.entity_id, new_unique_id=new_unique_id
         )
 
