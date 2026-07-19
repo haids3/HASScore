@@ -49,6 +49,7 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
         self._estimated_position: float = 0
         self._last_estimate_at: float | None = None
         self._last_rate = 0.0
+        self._last_raw_position: int | None = None
         self._segment_started_at: float | None = None
         self._segment_is_opening: bool | None = None
         self._segment_start_position: float = 0
@@ -77,7 +78,18 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
             raise UpdateFailed(str(err)) from err
 
         if status.state == DoorState.MOVING:
+            raw_position = status.position
             self._advance_position_estimate(status)
+            if (
+                self._last_raw_position is not None
+                and raw_position != self._last_raw_position
+            ):
+                # The hub is live-tracking this specific movement (e.g. a
+                # percent-open target) rather than freezing position until
+                # it settles, as an ordinary open/close does - prefer its
+                # own value over the estimate whenever it's actually moving.
+                self._estimated_position = raw_position
+            self._last_raw_position = raw_position
             estimated = round(min(99, max(1, self._estimated_position)))
             status = replace(status, position=estimated)
         else:
@@ -88,6 +100,7 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
             self._segment_started_at = None
             self._segment_is_opening = None
             self._last_estimate_at = None
+            self._last_raw_position = None
 
         self.update_interval = (
             MOVING_UPDATE_INTERVAL
@@ -102,9 +115,15 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
         Uses a calibrated travel curve (see calibration.py) when one covers
         this movement - i.e. calibration has been run and this leg started
         from the extreme the curve was measured from - otherwise falls back
-        to a flat estimate from the hub's own reported rate. The hub only
-        reports the last at-rest position while actually moving, so either
-        way we're extrapolating locally rather than showing a stale number.
+        to a flat estimate from the hub's own reported rate.
+
+        This estimate is only actually used by the caller when the hub isn't
+        already live-tracking the movement itself - confirmed live: an
+        ordinary open/close freezes `position` at the start value until it
+        settles, but a percent-open move reports real progress throughout.
+        Always run this regardless, so the estimate machinery (and its
+        segment/rate bookkeeping) stays current in case a movement's raw
+        position does turn out to be frozen.
         """
         now = time.monotonic()
         is_opening = status.rate > 0

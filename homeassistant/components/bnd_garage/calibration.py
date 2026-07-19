@@ -10,16 +10,23 @@ average rate (motor soft-start ramp-up, and mechanical deceleration
 approaching the limit), the middle faster to match.
 
 This is a deliberate assumption, not a per-installation measurement of the
-actual shape. Sampling true intermediate position requires stopping the
-door mid-travel (the hub only ever reports position at rest) - and doing
-that was tried and confirmed to backfire: each stop/restart re-triggers the
-motor's own soft-start ramp-up, so a curve built that way measured travel
-as ~60% slower than reality. The standard-shape assumption trades shape
-precision (not obtainable cleanly anyway) for not corrupting the one number
-that matters most: total time. Only used to improve the *displayed*
-estimated position while a door is moving - not for driving the door to a
-specific position, which turned out to need accuracy this approach can't
-deliver (see DEVELOPMENT_NOTES.md in bnd-garage-api).
+actual shape. Sampling true intermediate position by stopping the door
+mid-travel was tried and confirmed to backfire: each stop/restart
+re-triggers the motor's own soft-start ramp-up, so a curve built that way
+measured travel as ~60% slower than reality. The standard-shape assumption
+trades shape precision (not obtainable cleanly anyway) for not corrupting
+the one number that matters most: total time.
+
+This curve only applies to ordinary open/close, where the hub genuinely
+does freeze `position` at the start value until the door settles - live
+positioning to an exact target (`HubClient.set_open_percent`) is a
+different hub-native command that reports real progress throughout and
+needs no client-side estimate at all (confirmed live: `coordinator.py`
+prefers the hub's own value whenever it's actually advancing). The original
+finding that drove this whole approach - needing accuracy this method
+can't deliver for driving to a specific position - no longer applies to
+positioning at all now that a hub-native command exists for it; it only
+ever applied to plain open/close's *displayed* estimate while moving.
 """
 
 from dataclasses import dataclass

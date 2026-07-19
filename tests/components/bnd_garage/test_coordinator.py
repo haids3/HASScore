@@ -215,6 +215,50 @@ async def test_moving_position_reanchors_on_direction_reversal(
     await hass.async_block_till_done()
 
 
+async def test_moving_position_trusts_hub_when_it_advances_live(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test the coordinator prefers the hub's own live-advancing position."""
+    mock_client.get_status.return_value = HubStatus(
+        state=DoorState.CLOSED, position=0, rate=0
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=700.0,
+    ):
+        await setup_integration(hass, mock_config_entry, [])
+    coordinator = mock_config_entry.runtime_data
+
+    # First poll of a new move: no prior raw position to compare against yet,
+    # so the flat-rate estimate is used (clamped to 1).
+    mock_client.get_status.return_value = HubStatus(
+        state=DoorState.MOVING, position=0, rate=10
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=700.0,
+    ):
+        await coordinator.async_refresh()
+    assert coordinator.data.position == 1
+
+    # Second poll: the hub's raw position actually advanced to 27, not the
+    # flat-rate estimate's 20 (0 + 10%/s * 2s) - trust the hub's own value.
+    mock_client.get_status.return_value = HubStatus(
+        state=DoorState.MOVING, position=27, rate=10
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=702.0,
+    ):
+        await coordinator.async_refresh()
+    assert coordinator.data.position == 27
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+
 async def test_moving_position_uses_calibrated_curve(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
