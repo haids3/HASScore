@@ -256,6 +256,79 @@ async def test_moving_position_trusts_hub_when_it_advances_live(
         await coordinator.async_refresh()
     assert coordinator.data.position == 27
 
+    # Third poll: the hub's raw position hasn't changed since the last poll,
+    # but it's still a genuine non-extreme value - keep trusting it rather
+    # than letting the flat-rate estimate advance past it to 47.
+    mock_client.get_status.return_value = HubStatus(
+        state=DoorState.MOVING, position=27, rate=10
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=704.0,
+    ):
+        await coordinator.async_refresh()
+    assert coordinator.data.position == 27
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_moving_position_trusts_hub_intermediate_value_over_curve(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test a live intermediate raw position overrides the calibrated curve.
+
+    A percent-open move starting from an extreme (e.g. fully closed) starts
+    its segment at the same position an ordinary full open would, so the
+    calibrated curve - built from full-range travel and blind to any
+    target - would otherwise keep extrapolating toward 100 well past
+    wherever the move actually stops. As soon as the hub reports a genuine
+    non-extreme position, trust it directly instead of the curve.
+    """
+    mock_client.get_status.return_value = HubStatus(
+        state=DoorState.CLOSED, position=0, rate=0
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=800.0,
+    ):
+        await setup_integration(hass, mock_config_entry, [])
+    coordinator = mock_config_entry.runtime_data[0]
+    coordinator.open_curve = CalibrationCurve(points=((0, 0), (5, 40), (10, 100)))
+
+    mock_client.get_status.return_value = HubStatus(
+        state=DoorState.MOVING, position=0, rate=10
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=800.0,
+    ):
+        await coordinator.async_refresh()
+
+    # The curve alone would report 76 here (40 + (100-40) * 3/5 past its
+    # second point) - the hub's own live value of 55 wins instead.
+    mock_client.get_status.return_value = HubStatus(
+        state=DoorState.MOVING, position=55, rate=10
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=808.0,
+    ):
+        await coordinator.async_refresh()
+    assert coordinator.data.position == 55
+
+    mock_client.get_status.return_value = HubStatus(
+        state=DoorState.PARTIAL, position=55, rate=0
+    )
+    with patch(
+        "homeassistant.components.bnd_garage.coordinator.time.monotonic",
+        return_value=810.0,
+    ):
+        await coordinator.async_refresh()
+    assert coordinator.data.position == 55
+
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
 

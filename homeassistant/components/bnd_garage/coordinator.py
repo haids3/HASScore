@@ -59,10 +59,10 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
         self._estimated_position: float = 0
         self._last_estimate_at: float | None = None
         self._last_rate = 0.0
-        self._last_raw_position: int | None = None
         self._segment_started_at: float | None = None
         self._segment_is_opening: bool | None = None
         self._segment_start_position: float = 0
+        self._segment_start_raw_position: int | None = None
         self._pending_preset_cmd: int | None = None
         device_options = config_entry.options.get(CONF_DEVICES, {}).get(device_id, {})
         self.open_curve = CalibrationCurve.from_json(
@@ -127,18 +127,15 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
             raise UpdateFailed(str(err)) from err
 
         if status.state == DoorState.MOVING:
-            raw_position = status.position
             self._advance_position_estimate(status)
-            if (
-                self._last_raw_position is not None
-                and raw_position != self._last_raw_position
-            ):
-                # The hub is live-tracking this specific movement (e.g. a
-                # percent-open target) rather than freezing position until
-                # it settles, as an ordinary open/close does - prefer its
-                # own value over the estimate whenever it's actually moving.
-                self._estimated_position = raw_position
-            self._last_raw_position = raw_position
+            if status.position != self._segment_start_raw_position:
+                # A door genuinely frozen mid-travel (ordinary open/close)
+                # only ever reports the position it started this movement
+                # from while MOVING. Anything else means the hub is
+                # live-tracking this specific movement (e.g. a percent-open
+                # target) - trust its own value directly rather than our
+                # estimate.
+                self._estimated_position = status.position
             estimated = round(min(99, max(1, self._estimated_position)))
             status = replace(status, position=estimated)
         else:
@@ -148,8 +145,8 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
             self._estimated_position = status.position
             self._segment_started_at = None
             self._segment_is_opening = None
+            self._segment_start_raw_position = None
             self._last_estimate_at = None
-            self._last_raw_position = None
 
         self.update_interval = (
             MOVING_UPDATE_INTERVAL
@@ -167,12 +164,14 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
         to a flat estimate from the hub's own reported rate.
 
         This estimate is only actually used by the caller when the hub isn't
-        already live-tracking the movement itself - confirmed live: an
-        ordinary open/close freezes `position` at the start value until it
-        settles, but a percent-open move reports real progress throughout.
-        Always run this regardless, so the estimate machinery (and its
-        segment/rate bookkeeping) stays current in case a movement's raw
-        position does turn out to be frozen.
+        already live-tracking the movement itself - the caller detects that
+        by comparing the hub's raw position against `_segment_start_raw_position`
+        (set below): an ordinary open/close freezes `position` at whatever
+        value the door started this movement from until it settles, but a
+        percent-open move reports real progress throughout. Always run this
+        regardless, so the estimate machinery (and its segment/rate
+        bookkeeping) stays current in case a movement's raw position does
+        turn out to be frozen.
         """
         now = time.monotonic()
         is_opening = status.rate > 0
@@ -181,6 +180,7 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
             self._segment_started_at = now
             self._segment_is_opening = is_opening
             self._segment_start_position = self._estimated_position
+            self._segment_start_raw_position = status.position
 
         curve = self.open_curve if is_opening else self.close_curve
         reference = 0 if is_opening else 100
