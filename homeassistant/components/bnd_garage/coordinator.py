@@ -120,7 +120,7 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
     async def _async_update_data(self) -> HubStatus:
         """Fetch this device's current status from the hub."""
         try:
-            status = await self.client.get_status(self.device_id)
+            status = await self._get_status_with_retry()
         except AuthenticationError as err:
             raise ConfigEntryAuthFailed from err
         except HubUnreachableError as err:
@@ -154,6 +154,19 @@ class BndGarageDataUpdateCoordinator(DataUpdateCoordinator[HubStatus]):
             else UPDATE_INTERVAL
         )
         return status
+
+    async def _get_status_with_retry(self) -> HubStatus:
+        """Fetch status, retrying once on a transient timeout/connection error.
+
+        This hub occasionally misses a poll under ordinary conditions - a
+        one-off `HubUnreachableError` here shouldn't flip every entity
+        unavailable until the next scheduled update; only give up if a
+        prompt retry also fails.
+        """
+        try:
+            return await self.client.get_status(self.device_id)
+        except HubUnreachableError:
+            return await self.client.get_status(self.device_id)
 
     def _advance_position_estimate(self, status: HubStatus) -> None:
         """Advance the position estimate for one poll while moving.

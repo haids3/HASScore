@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock, patch
 
+from bnd_garage_client.errors import HubUnreachableError
 from bnd_garage_client.models import DoorState, HubStatus
 import pytest
 
@@ -11,6 +12,7 @@ from homeassistant.components.bnd_garage.coordinator import (
     UPDATE_INTERVAL,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from . import setup_integration
 from .conftest import TEST_DEVICE_ID
@@ -68,6 +70,44 @@ async def test_poll_interval_reverts_after_movement_stops(
 
     assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
+
+
+async def test_transient_timeout_is_retried_without_going_unavailable(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test a single failed poll is retried instead of surfacing immediately."""
+    await setup_integration(hass, mock_config_entry, [])
+    coordinator = mock_config_entry.runtime_data[0]
+    mock_client.get_status.reset_mock()
+
+    mock_client.get_status.side_effect = [
+        HubUnreachableError("timed out calling app/res/devices/fetch"),
+        HubStatus(state=DoorState.CLOSED, position=0, rate=0),
+    ]
+    await coordinator.async_refresh()
+
+    assert coordinator.last_update_success is True
+    assert mock_client.get_status.await_count == 2
+
+
+async def test_repeated_timeout_still_surfaces_as_unavailable(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: AsyncMock,
+) -> None:
+    """Test the retry doesn't mask a genuinely unreachable hub."""
+    await setup_integration(hass, mock_config_entry, [])
+    coordinator = mock_config_entry.runtime_data[0]
+    mock_client.get_status.reset_mock()
+
+    mock_client.get_status.side_effect = HubUnreachableError("timed out")
+    await coordinator.async_refresh()
+
+    assert coordinator.last_update_success is False
+    assert isinstance(coordinator.last_exception, UpdateFailed)
+    assert mock_client.get_status.await_count == 2
 
 
 async def test_moving_position_is_estimated_from_elapsed_time(
