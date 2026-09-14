@@ -12,7 +12,6 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
 from .const import (
     CONF_ACTIVATION_CODE,
@@ -129,26 +128,6 @@ class BndGarageConfigFlow(ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
         )
-
-    @override
-    async def async_step_dhcp(
-        self, discovery_info: DhcpServiceInfo
-    ) -> ConfigFlowResult:
-        """Follow the hub to a new address when its DHCP lease changes.
-
-        Identifies the hub from its TLS certificate rather than trusting the
-        MAC alone, so a different device on the same OUI can never rewrite a
-        paired entry's host. Reads no credentials and opens no control
-        session, which matters because the hub only serves one at a time.
-        """
-        try:
-            hub_id = await read_hub_id(discovery_info.ip)
-        except HubUnreachableError:
-            return self.async_abort(reason="cannot_connect")
-
-        await self.async_set_unique_id(hub_id)
-        self._abort_if_unique_id_configured(updates={CONF_HOST: discovery_info.ip})
-        return self.async_abort(reason="not_paired")
 
     async def async_step_reauth(
         self, entry_data: Mapping[str, Any]

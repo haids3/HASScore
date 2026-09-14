@@ -62,7 +62,7 @@ def mock_register() -> Generator[AsyncMock]:
 
 @pytest.fixture
 def mock_read_hub_id() -> Generator[AsyncMock]:
-    """Mock the TLS-certificate hub ID read used by reconfigure and DHCP."""
+    """Mock the TLS-certificate hub ID read used by the reconfigure step."""
     with patch(
         "homeassistant.components.bnd_garage.config_flow.read_hub_id",
         autospec=True,
