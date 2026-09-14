@@ -2,8 +2,11 @@
   "config": {
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "not_paired": "This hub has not been paired with Home Assistant yet.",
       "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
-      "wrong_hub": "The provided credentials belong to a different hub than the one being re-authenticated."
+      "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]",
+      "wrong_hub": "That is a different hub to the one already set up here."
     },
     "error": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
@@ -21,6 +24,15 @@
           "user_password": "The password shown for the new user in the B&D Smart Garage Access app - it's assigned automatically, not one you choose."
         },
         "description": "Re-pair with your B&D SmartDoorDevices hub. In the B&D Smart Garage Access app, go to Settings → Users → your hub → Add new user, then note the activation code and password it shows you."
+      },
+      "reconfigure": {
+        "data": {
+          "host": "[%key:component::bnd_garage::config::step::user::data::host%]"
+        },
+        "data_description": {
+          "host": "The new LAN IP address of your B&D hub (Basestation). Check your router's DHCP client list."
+        },
+        "description": "Update the address Home Assistant uses to reach your hub. Your pairing is kept, so the doors and their history stay as they are."
       },
       "user": {
         "data": {

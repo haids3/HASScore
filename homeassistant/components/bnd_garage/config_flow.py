@@ -6,11 +6,13 @@ from typing import Any, override
 
 from bnd_garage_client import Credentials, pair_new_phone
 from bnd_garage_client.errors import AuthenticationError, HubUnreachableError
+from bnd_garage_client.transport import read_hub_id
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
 from .const import (
     CONF_ACTIVATION_CODE,
@@ -39,6 +41,8 @@ STEP_REAUTH_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_USER_PASSWORD): str,
     }
 )
+
+STEP_RECONFIGURE_DATA_SCHEMA = vol.Schema({vol.Required(CONF_HOST): str})
 
 
 def _credentials_to_entry_data(
@@ -92,6 +96,59 @@ class BndGarageConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
         )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Point an existing entry at a new IP address for the same hub.
+
+        The stored credentials are keyed to the hub itself, not to where it
+        happens to be on the network, so only the host needs rewriting - no
+        re-pairing, and the entities keep their history.
+        """
+        errors: dict[str, str] = {}
+        reconfigure_entry = self._get_reconfigure_entry()
+
+        if user_input is not None:
+            try:
+                hub_id = await read_hub_id(user_input[CONF_HOST])
+            except HubUnreachableError:
+                errors["base"] = "cannot_connect"
+            else:
+                await self.async_set_unique_id(hub_id)
+                self._abort_if_unique_id_mismatch(reason="wrong_hub")
+                return self.async_update_reload_and_abort(
+                    reconfigure_entry, data_updates={CONF_HOST: user_input[CONF_HOST]}
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=self.add_suggested_values_to_schema(
+                STEP_RECONFIGURE_DATA_SCHEMA,
+                {CONF_HOST: reconfigure_entry.data[CONF_HOST]},
+            ),
+            errors=errors,
+        )
+
+    @override
+    async def async_step_dhcp(
+        self, discovery_info: DhcpServiceInfo
+    ) -> ConfigFlowResult:
+        """Follow the hub to a new address when its DHCP lease changes.
+
+        Identifies the hub from its TLS certificate rather than trusting the
+        MAC alone, so a different device on the same OUI can never rewrite a
+        paired entry's host. Reads no credentials and opens no control
+        session, which matters because the hub only serves one at a time.
+        """
+        try:
+            hub_id = await read_hub_id(discovery_info.ip)
+        except HubUnreachableError:
+            return self.async_abort(reason="cannot_connect")
+
+        await self.async_set_unique_id(hub_id)
+        self._abort_if_unique_id_configured(updates={CONF_HOST: discovery_info.ip})
+        return self.async_abort(reason="not_paired")
 
     async def async_step_reauth(
         self, entry_data: Mapping[str, Any]

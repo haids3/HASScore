@@ -4,6 +4,7 @@
   "codeowners": ["@haids3"],
   "config_flow": true,
   "dependencies": [],
+  "dhcp": [{ "macaddress": "AC64CF*" }],
   "documentation": "https://www.home-assistant.io/integrations/bnd_garage",
   "integration_type": "hub",
   "iot_class": "local_polling",
